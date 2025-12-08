@@ -1,0 +1,13 @@
+# Tor Clipboard Scanner Dependencies
+
+# HTTP requests with SOCKS proxy support (for Tor)
+requests[socks]>=2.31.0
+
+# Tor controller library
+stem>=1.8.2
+
+# HTML parsing
+beautifulsoup4>=4.12.0
+
+# Optional: Better HTML parser (recommended)
+lxml>=4.9.3
