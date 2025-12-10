@@ -1,14 +1,11 @@
 # Tor Scanner - Git Ignore File
 
-# Configuration files (contains passwords!)
-.tor_scanner_config.json
+# Data directory (contains all config, logs, and state)
+data/
 
-# Log files
-*.txt
-!requirements.txt
-
-# History files
-inputs_history.json
+# Clean logs (kept in main directory but gitignored)
+*_clean.txt
+changes.txt
 
 # Python
 __pycache__/

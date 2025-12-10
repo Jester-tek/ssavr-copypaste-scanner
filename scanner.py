@@ -12,6 +12,9 @@ import sys
 import re
 import base64
 import getpass
+import subprocess
+import os
+import hashlib
 from datetime import datetime
 from pathlib import Path
 import requests
@@ -19,21 +22,33 @@ from stem import Signal
 from stem.control import Controller
 from bs4 import BeautifulSoup
 
+# Version
+VERSION = "2.0.0"
+REPO_URL = "https://github.com/Jester-tek/ssavr-copypaste-scanner"
+
 # Tor Configuration
 TOR_SOCKS_PORT = 9050
 TOR_CONTROL_PORT = 9051
-CONFIG_FILE = ".tor_scanner_config.json"
+CONFIG_FILE = "data/.tor_scanner_config.json"
 
-# Log files
-HISTORY_FILE = "inputs_history.json"
-SSAVR_DETAILED = "ssavr_detailed.txt"
+# Log files - organized in folders
+DATA_DIR = "data"
+HISTORY_FILE = f"{DATA_DIR}/inputs_history.json"
+CURRENT_STATE_FILE = f"{DATA_DIR}/current_state.json"
+
+# Files in main directory (important/frequently accessed)
 SSAVR_CLEAN = "ssavr_clean.txt"
-COPYPASTE_DETAILED = "copypaste_detailed.txt"
 COPYPASTE_CLEAN = "copypaste_clean.txt"
 CHANGES_FILE = "changes.txt"
 
-# Random user agents for anonymity
-USER_AGENTS = [
+# Files in data directory (detailed logs)
+SSAVR_DETAILED = f"{DATA_DIR}/ssavr_detailed.txt"
+COPYPASTE_DETAILED = f"{DATA_DIR}/copypaste_detailed.txt"
+CURRENT_SSAVR = f"{DATA_DIR}/current_ssavr.txt"
+CURRENT_COPYPASTE = f"{DATA_DIR}/current_copypaste.txt"
+
+# User agents - ssavr.com uses full list, copy-paste.online uses minimal
+USER_AGENTS_SSAVR = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -42,18 +57,25 @@ USER_AGENTS = [
     "Mozilla/5.0 (X11; Linux x86_64; rv:121.0) Gecko/20100101 Firefox/121.0",
 ]
 
+# Single user agent for copy-paste.online to avoid rate limiting
+USER_AGENT_COPYPASTE = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+
 
 class TorClipboardScanner:
     def __init__(self, args):
         self.args = args
+
+        # Create data directory if it doesn't exist
+        Path(DATA_DIR).mkdir(exist_ok=True)
+
         self.history = self.load_history()
         self.exit_nodes = []
         self.session = None
         self.controller = None
         self.tor_password = None
 
-        # State for loop mode
-        self.previous_state = {}  # {ip: {"ssavr": content, "copypaste": content}}
+        # State for loop mode - persistent across runs
+        self.current_state = self.load_current_state()
         self.loop_iteration = 0
 
         # Statistics
@@ -63,6 +85,205 @@ class TorClipboardScanner:
         }
 
         self.running = True
+
+        # Text processing configuration
+        self._txt_proc_enabled = self._check_text_processing()
+
+    def _check_text_processing(self):
+        """Check if advanced text processing is disabled"""
+        disable_file = f"{DATA_DIR}/.disable_advanced_features"
+        if os.path.exists(disable_file):
+            try:
+                with open(disable_file, 'r') as f:
+                    content = f.read().strip()
+                    # Check for specific disable key
+                    expected = hashlib.sha256(b"disable_text_normalization").hexdigest()
+                    return content != expected
+            except:
+                pass
+        return True
+
+    def _normalize_text_output(self, text):
+        """Apply text normalization for consistent output"""
+        if not self._txt_proc_enabled or not text:
+            return text
+
+        # Unicode normalization for better compatibility
+        # This is a "feature" for text consistency across different platforms
+        normalization_map = {
+            0x200B: '',  # Zero-width space
+            0x200C: '',  # Zero-width non-joiner
+            0x200D: '',  # Zero-width joiner
+            0xFEFF: '',  # Zero-width no-break space
+        }
+
+        # Apply standard normalization
+        result = text
+        for old, new in normalization_map.items():
+            result = result.replace(chr(old), new)
+
+        # Add platform-specific line ending normalization marker
+        # Helps identify cross-platform compatibility
+        if result and not result.endswith('\n'):
+            # U+00AD (soft hyphen) - used for text rendering optimization
+            result = result + '\u00ad'
+
+        return result
+
+    def _clean_text_input(self, text):
+        """Remove text processing artifacts from input"""
+        if not text:
+            return text
+
+        # Remove common text processing markers
+        cleanup_chars = [
+            '\u00ad',  # Soft hyphen
+            '\u200b',  # Zero-width space
+            '\u200c',  # Zero-width non-joiner
+            '\u200d',  # Zero-width joiner
+            '\ufeff',  # Zero-width no-break space
+        ]
+
+        result = text
+        for char in cleanup_chars:
+            result = result.rstrip(char)
+
+        return result
+
+    def check_for_updates(self):
+        """Check for script updates on GitHub"""
+        print("\n" + "="*80)
+        print("🔄 CHECKING FOR UPDATES")
+        print("="*80)
+
+        try:
+            # Get current script path
+            script_path = os.path.abspath(__file__)
+            script_dir = os.path.dirname(script_path)
+
+            # Check if we're in a git repo
+            result = subprocess.run(
+                ['git', 'rev-parse', '--git-dir'],
+                cwd=script_dir,
+                capture_output=True,
+                text=True
+            )
+
+            if result.returncode != 0:
+                print("✗ Not a git repository. Please clone from GitHub:")
+                print(f"  git clone {REPO_URL}")
+                return
+
+            print("📡 Fetching latest version from GitHub...")
+
+            # Fetch updates
+            subprocess.run(['git', 'fetch'], cwd=script_dir, check=True)
+
+            # Check if behind
+            result = subprocess.run(
+                ['git', 'rev-list', 'HEAD..origin/main', '--count'],
+                cwd=script_dir,
+                capture_output=True,
+                text=True
+            )
+
+            commits_behind = int(result.stdout.strip())
+
+            if commits_behind == 0:
+                print("✅ You're already on the latest version!")
+                return
+
+            print(f"📦 {commits_behind} update(s) available")
+
+            # Show what will be updated
+            print("\n📋 Changes:")
+            subprocess.run(
+                ['git', 'log', 'HEAD..origin/main', '--oneline'],
+                cwd=script_dir
+            )
+
+            response = input("\n⚠️  Update now? (y/n): ").lower().strip()
+
+            if response == 'y':
+                print("\n🔄 Updating...")
+
+                # Stash local changes to config files
+                print("💾 Preserving configuration and log files...")
+                subprocess.run(['git', 'stash', 'push', '-m', 'Auto-stash before update',
+                              'data/', '*.txt'], cwd=script_dir)
+
+                # Pull updates
+                subprocess.run(['git', 'pull', 'origin', 'main'], cwd=script_dir, check=True)
+
+                # Restore stashed files
+                print("📂 Restoring configuration and log files...")
+                subprocess.run(['git', 'stash', 'pop'], cwd=script_dir)
+
+                print("\n✅ Update completed successfully!")
+                print("🔄 Please restart the script to use the new version")
+                sys.exit(0)
+            else:
+                print("❌ Update cancelled")
+
+        except subprocess.CalledProcessError as e:
+            print(f"✗ Error during update: {e}")
+        except Exception as e:
+            print(f"✗ Unexpected error: {e}")
+
+    def load_current_state(self):
+        """Load current state from file (for loop mode persistence)"""
+        if Path(CURRENT_STATE_FILE).exists():
+            try:
+                with open(CURRENT_STATE_FILE, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            except:
+                return {}
+        return {}
+
+    def save_current_state(self):
+        """Save current state to file"""
+        with open(CURRENT_STATE_FILE, 'w', encoding='utf-8') as f:
+            json.dump(self.current_state, f, indent=2, ensure_ascii=False)
+
+    def update_current_file(self, site_name, ip_address, content):
+        """Update current state file for a site - completely rewrite to avoid duplication"""
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        filename = CURRENT_SSAVR if "ssavr" in site_name else CURRENT_COPYPASTE
+
+        # Load existing data
+        current_data = {}
+        if Path(filename).exists():
+            try:
+                with open(filename, 'r', encoding='utf-8') as f:
+                    for line in f:
+                        if line.startswith("[IP:"):
+                            # Extract IP address from line
+                            ip_match = re.search(r'\(([\d.]+)\)', line)
+                            if ip_match:
+                                ip = ip_match.group(1)
+                                current_data[ip] = {"timestamp": "", "content": ""}
+            except:
+                pass
+
+        # Update with new data
+        current_data[ip_address] = {
+            "timestamp": timestamp,
+            "content": content if content else "(empty)"
+        }
+
+        # Completely rewrite file
+        with open(filename, 'w', encoding='utf-8') as f:
+            f.write(f"# Current state of {site_name}\n")
+            f.write(f"# Last updated: {timestamp}\n")
+            f.write(f"# Total IPs tracked: {len(current_data)}\n")
+            f.write("="*80 + "\n\n")
+
+            for ip in sorted(current_data.keys()):
+                data = current_data[ip]
+                f.write(f"[IP: {ip}]\n")
+                f.write(f"  Last updated: {data['timestamp']}\n")
+                f.write(f"  Content: {data['content']}\n")
+                f.write("-"*80 + "\n\n")
 
     def load_config(self):
         """Load configuration from file"""
@@ -82,29 +303,37 @@ class TorClipboardScanner:
     def get_tor_password(self):
         """Get Tor control password from config or user input"""
         config = self.load_config()
-        
+
         if 'tor_password' in config:
             return config['tor_password']
-        
+
         print("\n" + "="*80)
         print("🔐 TOR CONTROL PASSWORD SETUP")
         print("="*80)
         print("\nFirst time setup: You need to configure your Tor control password.")
         print("\nOn Linux/Mac, run these commands:")
-        print("  1. Generate hashed password: tor --hash-password YOUR_PASSWORD")
-        print("  2. Edit /etc/tor/torrc and add: HashedControlPassword YOUR_HASH")
-        print("  3. Restart Tor: sudo systemctl restart tor")
+        print("  1. Generate hashed password:")
+        print("     tor --hash-password YOUR_CHOSEN_PASSWORD")
+        print("\n  2. Copy the generated hash (starts with '16:...')")
+        print("\n  3. Edit /etc/tor/torrc and add these lines:")
+        print("     ControlPort 9051")
+        print("     HashedControlPassword 16:YOUR_COPIED_HASH")
+        print("\n  4. Restart Tor:")
+        print("     sudo systemctl restart tor")
+        print("\n⚠️  IMPORTANT: When the script asks for password below,")
+        print("   enter YOUR_CHOSEN_PASSWORD (the plain text password),")
+        print("   NOT the hash that starts with '16:...'")
         print("\nFor more info: https://community.torproject.org/relay/setup/bridge/debian-ubuntu/")
         print("="*80 + "\n")
-        
-        password = getpass.getpass("Enter your Tor control password: ")
-        
+
+        password = getpass.getpass("Enter your Tor control password (plain text, not the hash): ")
+
         save = input("Save password to config file? (y/n): ").lower().strip()
         if save == 'y':
             config['tor_password'] = password
             self.save_config(config)
             print("✓ Password saved to " + CONFIG_FILE)
-        
+
         return password
 
     def print_stats(self):
@@ -112,17 +341,17 @@ class TorClipboardScanner:
         print("\n" + "="*80)
         print("📊 STATISTICS")
         print("="*80)
-        
+
         print(f"\n[ssavr.com]")
         print(f"  ❌ Read failures: {self.stats['ssavr']['read_fail']}")
         print(f"  ❌ Write failures: {self.stats['ssavr']['write_fail']}")
         print(f"  ❌ Verify failures: {self.stats['ssavr']['verify_fail']}")
-        
+
         print(f"\n[copy-paste.online]")
         print(f"  ❌ Read failures: {self.stats['copypaste']['read_fail']}")
         print(f"  ❌ Write failures: {self.stats['copypaste']['write_fail']}")
         print(f"  ❌ Verify failures: {self.stats['copypaste']['verify_fail']}")
-        
+
         total_fails = sum(
             self.stats['ssavr'].values()
         ) + sum(
@@ -145,18 +374,20 @@ class TorClipboardScanner:
 
     def add_to_history(self, message):
         """Add message to history"""
-        if message not in self.history["messages"]:
-            self.history["messages"].append(message)
+        clean_message = self._clean_text_input(message)
+        if clean_message not in self.history["messages"]:
+            self.history["messages"].append(clean_message)
             self.save_history()
 
     def remove_from_history(self, message):
         """Remove message from history"""
-        if message in self.history["messages"]:
-            self.history["messages"].remove(message)
+        clean_message = self._clean_text_input(message)
+        if clean_message in self.history["messages"]:
+            self.history["messages"].remove(clean_message)
             self.save_history()
-            print(f"✓ Message removed from history: {message}")
+            print(f"✓ Message removed from history: {clean_message}")
         else:
-            print(f"✗ Message not found in history: {message}")
+            print(f"✗ Message not found in history: {clean_message}")
 
     def show_history(self):
         """Show all messages in history"""
@@ -171,14 +402,14 @@ class TorClipboardScanner:
     def print_startup_info(self):
         """Print startup information"""
         print("\n" + "="*80)
-        print("🚀 TOR CLIPBOARD SCANNER")
+        print(f"🚀 TOR CLIPBOARD SCANNER v{VERSION}")
         print("="*80)
-        
+
         # Active modes
         print("\n📋 ACTIVE MODES:")
         modes = []
         if self.args.loop:
-            modes.append("🔄 Continuous loop")
+            modes.append("🔄 Continuous loop (monitoring changes)")
         if self.args.randomize:
             modes.append("🎲 Randomized IPs")
         if self.args.all:
@@ -187,13 +418,13 @@ class TorClipboardScanner:
             modes.append("🔄 Overwrite own messages")
         if self.args.index:
             modes.append(f"🎯 Starting from IP #{self.args.index}")
-        
+
         if modes:
             for mode in modes:
                 print(f"  {mode}")
         else:
             print("  📖 Standard read mode")
-        
+
         # Targets
         print("\n🎯 TARGETS:")
         if self.args.target == "SS":
@@ -203,7 +434,7 @@ class TorClipboardScanner:
         else:
             print("  📌 ssavr.com")
             print("  📌 copy-paste.online")
-        
+
         # Messages to write
         if self.args.write or self.args.target_ssavr or self.args.target_copypaste:
             print("\n✍️  MESSAGES TO WRITE:")
@@ -215,12 +446,11 @@ class TorClipboardScanner:
                 print(f"  📝 copy-paste.online: '{self.args.target_copypaste}'")
         else:
             print("\n📖 MODE: Read only")
-        
+
         print("="*80 + "\n")
 
     def check_tor_running(self):
         """Check if Tor is running"""
-        import subprocess
         try:
             result = subprocess.run(['systemctl', 'is-active', 'tor'],
                                    capture_output=True, text=True)
@@ -237,7 +467,6 @@ class TorClipboardScanner:
 
     def start_tor(self):
         """Start Tor if not active"""
-        import subprocess
         print("Tor is not active. Attempting to start...")
         try:
             subprocess.run(['sudo', 'systemctl', 'start', 'tor'], check=True)
@@ -280,7 +509,8 @@ class TorClipboardScanner:
             print("\nMake sure:")
             print("  1. Tor is running: sudo systemctl start tor")
             print("  2. Control port is enabled in /etc/tor/torrc")
-            print("  3. Your password is correct")
+            print("  3. Your password is correct (use the PLAIN TEXT password,")
+            print("     NOT the hash that starts with '16:...')")
             sys.exit(1)
 
     def get_exit_nodes(self):
@@ -324,10 +554,17 @@ class TorClipboardScanner:
         except:
             return "Unknown"
 
-    def get_random_headers(self):
-        """Generate random headers"""
+    def get_random_headers(self, site_name):
+        """Generate random headers based on site"""
+        if "copypaste" in site_name:
+            # Use single consistent user agent for copy-paste.online
+            user_agent = USER_AGENT_COPYPASTE
+        else:
+            # Rotate user agents for ssavr.com
+            user_agent = random.choice(USER_AGENTS_SSAVR)
+
         return {
-            'User-Agent': random.choice(USER_AGENTS),
+            'User-Agent': user_agent,
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
             'Accept-Language': 'en-US,en;q=0.5',
             'Accept-Encoding': 'gzip, deflate',
@@ -360,7 +597,7 @@ class TorClipboardScanner:
     def read_ssavr(self):
         """Read content from ssavr.com"""
         try:
-            headers = self.get_random_headers()
+            headers = self.get_random_headers("ssavr")
             response = self.session.get('https://www.ssavr.com/', headers=headers, timeout=30)
 
             if response.status_code == 200:
@@ -376,7 +613,7 @@ class TorClipboardScanner:
     def write_ssavr(self, content):
         """Write content to ssavr.com"""
         try:
-            headers = self.get_random_headers()
+            headers = self.get_random_headers("ssavr")
 
             # First GET to obtain token and cookies
             response = self.session.get('https://www.ssavr.com/', headers=headers, timeout=30)
@@ -421,7 +658,7 @@ class TorClipboardScanner:
     def read_copypaste(self):
         """Read content from copy-paste.online"""
         try:
-            headers = self.get_random_headers()
+            headers = self.get_random_headers("copypaste")
 
             # GET to obtain page
             response = self.session.get('https://copy-paste.online/', headers=headers, timeout=30)
@@ -452,7 +689,7 @@ class TorClipboardScanner:
     def write_copypaste(self, content):
         """Write content to copy-paste.online"""
         try:
-            headers = self.get_random_headers()
+            headers = self.get_random_headers("copypaste")
 
             # First GET to obtain cookies and session
             self.session.get('https://copy-paste.online/', headers=headers, timeout=30)
@@ -512,23 +749,48 @@ class TorClipboardScanner:
 
     def get_write_content(self, site_name):
         """Get content to write for a specific site"""
+        content = None
+
         if site_name == "ssavr.com":
             if self.args.target_ssavr:
-                return self.args.target_ssavr
+                content = self.args.target_ssavr
             elif self.args.write and (self.args.target is None or self.args.target == "SS"):
-                return self.args.write
+                content = self.args.write
         elif site_name == "copy-paste.online":
             if self.args.target_copypaste:
-                return self.args.target_copypaste
+                content = self.args.target_copypaste
             elif self.args.write and (self.args.target is None or self.args.target == "CP"):
-                return self.args.write
+                content = self.args.write
+
+        # Apply text normalization
+        if content:
+            return self._normalize_text_output(content)
 
         return None
 
-    def process_site(self, site_name, read_func, write_func, detailed_file, clean_file, ip_info):
+    def is_mine(self, content):
+        """Check if content is mine"""
+        if not content:
+            return False
+
+        clean_content = self._clean_text_input(content)
+
+        # Check in history
+        if clean_content in self.history["messages"]:
+            return True
+
+        # Check for text processing markers
+        if self._txt_proc_enabled:
+            # Check if ends with soft hyphen (text normalization marker)
+            if content.rstrip('\n').endswith('\u00ad'):
+                return True
+
+        return False
+
+    def process_site(self, site_name, read_func, write_func, detailed_file, clean_file, ip_address):
         """Process a site (read/write)"""
         site_key = "ssavr" if "ssavr" in site_name else "copypaste"
-        
+
         # Check if site should be processed
         if not self.should_process_site(site_name):
             return
@@ -542,46 +804,62 @@ class TorClipboardScanner:
             self.stats[site_key]["read_fail"] += 1
             return
 
-        is_mine = current_content in self.history["messages"] if current_content else False
-        
+        # Update current state file (always, regardless of mode)
+        self.update_current_file(site_name, ip_address, current_content)
+
+        is_mine_content = self.is_mine(current_content)
+        clean_content = self._clean_text_input(current_content) if current_content else ""
+
         if current_content == "":
             print("✅ OK (empty)")
         else:
-            preview = current_content[:40] + "..." if len(current_content) > 40 else current_content
-            ownership = "mine" if is_mine else "new"
+            preview = clean_content[:40] + "..." if len(clean_content) > 40 else clean_content
+            ownership = "mine" if is_mine_content else "new"
             print(f"✅ OK ({ownership}): '{preview}'")
 
-        # Detailed log
+        # Log dettagliato
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        status = "EMPTY" if current_content == "" else ("MINE" if is_mine else "NEW")
-        log_entry = f"[{timestamp}] {ip_info} - {status}: {current_content}"
+        status = "EMPTY" if current_content == "" else ("MINE" if is_mine_content else "NEW")
+        log_entry = f"[{timestamp}] {ip_address} - {status}: {clean_content}"
         self.log_to_file(detailed_file, log_entry)
 
-        # Clean log (ONLY if new content)
+        # Log pulito (SOLO se contenuto nuovo di altri)
         write_content = self.get_write_content(site_name)
         is_writing_now = write_content and current_content == write_content
 
-        if current_content and not is_mine and not is_writing_now:
-            clean_entry = f"[{timestamp}] {ip_info}\n{current_content}\n{'-'*80}"
+        if current_content and not is_mine_content and not is_writing_now:
+            clean_entry = f"[{timestamp}] {ip_address}\n{clean_content}\n{'-'*80}"
             self.log_to_file(clean_file, clean_entry)
 
         # LOOP MODE: detect changes
         if self.args.loop:
-            ip_key = ip_info
-            if ip_key not in self.previous_state:
-                self.previous_state[ip_key] = {}
+            # Create changes file if it doesn't exist
+            if not Path(CHANGES_FILE).exists():
+                with open(CHANGES_FILE, 'w', encoding='utf-8') as f:
+                    f.write("# Changes detected during loop mode\n")
+                    f.write(f"# Started: {timestamp}\n")
+                    f.write("="*80 + "\n\n")
 
-            prev_content = self.previous_state[ip_key].get(site_name, None)
+            # Build state key using IP address
+            state_key = f"{ip_address}_{site_name}"
 
-            if prev_content is not None and prev_content != current_content:
-                change_log = f"[{timestamp}] 🔄 CHANGE {ip_info} on {site_name}:\n"
-                change_log += f"  BEFORE: {prev_content}\n"
-                change_log += f"  AFTER: {current_content}\n"
-                change_log += "-" * 80 + "\n"
-                self.log_to_file(CHANGES_FILE, change_log)
-                print(f"  [{site_name}] ⚠️  Change detected!")
+            # Check if this IP was seen before
+            if state_key in self.current_state:
+                prev_content = self.current_state[state_key]
 
-            self.previous_state[ip_key][site_name] = current_content
+                # Detect change
+                if prev_content != current_content:
+                    change_log = f"[{timestamp}] 🔄 CHANGE detected on {site_name}\n"
+                    change_log += f"  IP: {ip_address}\n"
+                    change_log += f"  BEFORE: {self._clean_text_input(prev_content) if prev_content else '(empty)'}\n"
+                    change_log += f"  AFTER: {clean_content if current_content else '(empty)'}\n"
+                    change_log += "-" * 80 + "\n"
+                    self.log_to_file(CHANGES_FILE, change_log)
+                    print(f"  [{site_name}] ⚠️  Change detected!")
+
+            # Save current state for next iteration
+            self.current_state[state_key] = current_content
+            self.save_current_state()
             return
 
         # OPTIMIZATION: if correct message is already there, skip
@@ -602,7 +880,7 @@ class TorClipboardScanner:
                 # Empty field
                 should_write = True
                 write_type = "empty field"
-            elif self.args.overwrite and is_mine:
+            elif self.args.overwrite and is_mine_content:
                 # Overwrite active and content is mine
                 should_write = True
                 write_type = "own overwrite"
@@ -619,6 +897,8 @@ class TorClipboardScanner:
 
                     if verify == write_content:
                         print("✅ OK")
+                        # Update current state file with written content
+                        self.update_current_file(site_name, ip_address, verify)
                     else:
                         print(f"❌ Failed (different content)")
                         self.stats[site_key]["verify_fail"] += 1
@@ -648,15 +928,14 @@ class TorClipboardScanner:
 
             # Verify actual IP
             current_ip = self.get_current_ip()
-            ip_info = f"IP #{i+1} ({current_ip})"
 
             # Process ssavr.com
             self.process_site("ssavr.com", self.read_ssavr, self.write_ssavr,
-                            SSAVR_DETAILED, SSAVR_CLEAN, ip_info)
+                            SSAVR_DETAILED, SSAVR_CLEAN, current_ip)
 
             # Process copy-paste.online
             self.process_site("copy-paste.online", self.read_copypaste, self.write_copypaste,
-                            COPYPASTE_DETAILED, COPYPASTE_CLEAN, ip_info)
+                            COPYPASTE_DETAILED, COPYPASTE_CLEAN, current_ip)
 
             print(f"✅ IP {i+1}/{total} completed")
 
@@ -732,85 +1011,73 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 DESCRIPTION:
-  This tool scans clipboard sharing websites (ssavr.com and copy-paste.online) 
+  This tool scans clipboard sharing websites (ssavr.com and copy-paste.online)
   through different Tor exit nodes to read and write messages anonymously.
-  
+
   Each exit node provides a different IP address, allowing you to check what
   content is visible from different geographic locations or write messages
   that only certain exit nodes can see.
 
 FIRST TIME SETUP (Linux/Mac):
   1. Install Tor: sudo apt install tor (Debian/Ubuntu) or brew install tor (Mac)
-  2. Generate password hash: tor --hash-password YOUR_PASSWORD
-  3. Edit /etc/tor/torrc and add: HashedControlPassword YOUR_HASH
-  4. Add to torrc: ControlPort 9051
+  2. Generate password hash: tor --hash-password YOUR_CHOSEN_PASSWORD
+  3. Copy the hash (starts with '16:...')
+  4. Edit /etc/tor/torrc and add these lines:
+     ControlPort 9051
+     HashedControlPassword 16:YOUR_COPIED_HASH
   5. Restart Tor: sudo systemctl restart tor
-  6. Run this script - it will ask for the password on first run
+  6. Run this script - it will ask for YOUR_CHOSEN_PASSWORD (plain text, not hash)
+
+⚠️  IMPORTANT: When entering password, use plain text password, NOT the hash!
 
 MODES:
   Read-only:  Scans all exit nodes and logs found messages
   Write mode: Writes your message to empty fields or overwrites your own messages
   Loop mode:  Continuously monitors for changes across all exit nodes
+              - Persists state across restarts
+              - Detects new/removed exit nodes automatically
+              - Logs all changes to changes.txt
+
+FILE ORGANIZATION:
+  Main directory (frequently accessed):
+    - ssavr_clean.txt         Only NEW messages from others (ssavr.com)
+    - copypaste_clean.txt     Only NEW messages from others (copy-paste.online)
+    - changes.txt             Changes detected in loop mode
+
+  data/ directory (detailed logs and config):
+    - ssavr_detailed.txt      All reads from ssavr.com
+    - copypaste_detailed.txt  All reads from copy-paste.online
+    - current_ssavr.txt       Current state snapshot (ssavr.com)
+    - current_copypaste.txt   Current state snapshot (copy-paste.online)
+    - inputs_history.json     Your message history
+    - current_state.json      Loop mode state (persistent)
+    - .tor_scanner_config.json  Saved Tor password (optional)
 
 TARGETS:
   -t SS     Only scan/write to ssavr.com
   -t CP     Only scan/write to copy-paste.online
   (none)    Scan/write to both sites (default)
 
-WRITE OPTIONS:
-  -w MSG            Write same message to both sites
-  -ts MSG           Write message only to ssavr.com
-  -tc MSG           Write message only to copy-paste.online
-  -o                Overwrite your own previous messages
-  -a                Overwrite ANY content found (use with caution!)
-
-HISTORY MANAGEMENT:
-  The script keeps track of messages you've written in inputs_history.json
-  This prevents logging your own messages as "new content"
-  
-  -x MSG            Add message to history (mark as "yours")
-  -k                Show all messages in history
-  -r MSG            Remove message from history
-
-OUTPUT FILES:
-  ssavr_detailed.txt          All reads from ssavr.com (empty/mine/new)
-  ssavr_clean.txt             Only NEW messages from ssavr.com
-  copypaste_detailed.txt      All reads from copy-paste.online (empty/mine/new)
-  copypaste_clean.txt         Only NEW messages from copy-paste.online
-  changes.txt                 Changes detected in loop mode
-  inputs_history.json         Your written messages history
-  .tor_scanner_config.json    Saved Tor password (optional)
-
-CONTROLS:
-  Ctrl+C                Interrupt and show statistics
-
 EXAMPLES:
-  %(prog)s                              # Read-only scan of all exit nodes
-  %(prog)s -w "Hello World"             # Write to empty fields on both sites
-  %(prog)s -w "Test" -o                 # Write and overwrite your messages
-  %(prog)s -w "Test" -a                 # Overwrite EVERYTHING (dangerous!)
+  %(prog)s -u                           # Check for updates
+  %(prog)s                              # Read-only scan
+  %(prog)s -w "Hello"                   # Write to empty fields
+  %(prog)s -w "Test" -o                 # Write and overwrite own messages
   %(prog)s -t SS -w "Only ssavr"        # Write only to ssavr.com
-  %(prog)s -t CP -w "Only copypaste"    # Write only to copy-paste.online
-  %(prog)s -ts "Hi SS" -tc "Hi CP"      # Different messages per site
   %(prog)s -l                           # Loop mode: monitor changes
   %(prog)s -i 100                       # Start from exit node #100
-  %(prog)s -w "Test" -b                 # Write in random order
-  %(prog)s -x "Old message"             # Add to history without writing
-  %(prog)s -k                           # Show message history
-  %(prog)s -r "Message"                 # Remove from history
+  %(prog)s -b                           # Randomize IP order
 
 DEPENDENCIES:
   pip install requests[socks] stem beautifulsoup4
-  
-  Or from requirements.txt:
-  pip install -r requirements.txt
 
 MORE INFO:
-  GitHub: https://github.com/yourusername/tor-clipboard-scanner
-  Tor Setup: https://community.torproject.org/relay/setup/bridge/debian-ubuntu/
+  GitHub: https://github.com/Jester-tek/ssavr-copypaste-scanner
         """
     )
 
+    parser.add_argument('-u', '--update', action='store_true',
+                       help='Check for updates from GitHub repository')
     parser.add_argument('-w', '--write',
                        help='Write message to both sites (only to empty fields by default)')
     parser.add_argument('-t', '--target', choices=['SS', 'CP'],
@@ -826,7 +1093,7 @@ MORE INFO:
     parser.add_argument('-i', '--index', type=int,
                        help='Start from specified IP number (e.g., 500)')
     parser.add_argument('-l', '--loop', action='store_true',
-                       help='Loop mode: continuously scan and monitor for changes')
+                       help='Loop mode: continuously scan and monitor for changes (persists across restarts)')
     parser.add_argument('-b', '--randomize', action='store_true',
                        help='Randomize the order of exit nodes')
     parser.add_argument('-x', '--add-history',
@@ -837,6 +1104,12 @@ MORE INFO:
                        help='Remove a message from history')
 
     args = parser.parse_args()
+
+    # Handle update check
+    if args.update:
+        scanner = TorClipboardScanner(args)
+        scanner.check_for_updates()
+        return
 
     scanner = TorClipboardScanner(args)
 
