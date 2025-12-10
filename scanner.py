@@ -595,20 +595,42 @@ class TorClipboardScanner:
         return None
 
     def read_ssavr(self):
-        """Read content from ssavr.com"""
-        try:
-            headers = self.get_random_headers("ssavr")
-            response = self.session.get('https://www.ssavr.com/', headers=headers, timeout=30)
+        """Read content from ssavr.com with retry logic"""
+        max_retries = 2
+        retry_delay = 2
 
-            if response.status_code == 200:
-                soup = BeautifulSoup(response.text, 'html.parser')
-                textarea = soup.find('textarea', {'id': 'savr'})
-                if textarea:
-                    return textarea.text.strip()
-                return ""
-            return None
-        except Exception as e:
-            return None
+        for attempt in range(max_retries):
+            try:
+                headers = self.get_random_headers("ssavr")
+                response = self.session.get('https://www.ssavr.com/', headers=headers, timeout=30)
+
+                if response.status_code == 200:
+                    soup = BeautifulSoup(response.text, 'html.parser')
+                    textarea = soup.find('textarea', {'id': 'savr'})
+                    if textarea:
+                        content = textarea.text.strip()
+
+                        # If empty and not last attempt, retry to confirm
+                        if content == "" and attempt < max_retries - 1:
+                            time.sleep(retry_delay)
+                            continue
+
+                        return content
+                    return ""
+
+                # If non-200 status and not last attempt, retry
+                if attempt < max_retries - 1:
+                    time.sleep(retry_delay)
+                    continue
+
+                return None
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    time.sleep(retry_delay)
+                    continue
+                return None
+
+        return None
 
     def write_ssavr(self, content):
         """Write content to ssavr.com"""
@@ -656,35 +678,69 @@ class TorClipboardScanner:
             return False
 
     def read_copypaste(self):
-        """Read content from copy-paste.online"""
-        try:
-            headers = self.get_random_headers("copypaste")
+        """Read content from copy-paste.online with retry logic"""
+        max_retries = 2
+        retry_delay = 2
 
-            # GET to obtain page
-            response = self.session.get('https://copy-paste.online/', headers=headers, timeout=30)
+        for attempt in range(max_retries):
+            try:
+                headers = self.get_random_headers("copypaste")
 
-            if response.status_code == 200:
-                soup = BeautifulSoup(response.text, 'html.parser')
+                # GET to obtain page
+                response = self.session.get('https://copy-paste.online/', headers=headers, timeout=30)
 
-                # Site uses id="text" and class="COPYPASTE"
-                textarea = soup.find('textarea', {'id': 'text'})
-                if textarea:
-                    return textarea.text.strip()
+                if response.status_code == 200:
+                    soup = BeautifulSoup(response.text, 'html.parser')
 
-                # Fallback: search by class
-                textarea = soup.find('textarea', {'class': 'COPYPASTE'})
-                if textarea:
-                    return textarea.text.strip()
+                    # Site uses id="text" and class="COPYPASTE"
+                    textarea = soup.find('textarea', {'id': 'text'})
+                    if textarea:
+                        content = textarea.text.strip()
 
-                # Last fallback: first textarea
-                textarea = soup.find('textarea')
-                if textarea:
-                    return textarea.text.strip()
+                        # If empty and not last attempt, retry to confirm
+                        if content == "" and attempt < max_retries - 1:
+                            time.sleep(retry_delay)
+                            continue
 
-                return ""
-            return None
-        except Exception as e:
-            return None
+                        return content
+
+                    # Fallback: search by class
+                    textarea = soup.find('textarea', {'class': 'COPYPASTE'})
+                    if textarea:
+                        content = textarea.text.strip()
+
+                        if content == "" and attempt < max_retries - 1:
+                            time.sleep(retry_delay)
+                            continue
+
+                        return content
+
+                    # Last fallback: first textarea
+                    textarea = soup.find('textarea')
+                    if textarea:
+                        content = textarea.text.strip()
+
+                        if content == "" and attempt < max_retries - 1:
+                            time.sleep(retry_delay)
+                            continue
+
+                        return content
+
+                    return ""
+
+                # If non-200 status and not last attempt, retry
+                if attempt < max_retries - 1:
+                    time.sleep(retry_delay)
+                    continue
+
+                return None
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    time.sleep(retry_delay)
+                    continue
+                return None
+
+        return None
 
     def write_copypaste(self, content):
         """Write content to copy-paste.online"""
@@ -800,7 +856,7 @@ class TorClipboardScanner:
         current_content = read_func()
 
         if current_content is None:
-            print("❌ Failed (connection error)")
+            print("❌ Failed (connection error after retries)")
             self.stats[site_key]["read_fail"] += 1
             return
 

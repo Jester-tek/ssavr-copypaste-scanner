@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [2.0.0] - 2024-12-10
+## [2.0.0]
 
 ### Major Changes
 - **Complete file reorganization**: 
@@ -15,6 +15,10 @@ All notable changes to this project will be documented in this file.
   - Clean, readable format maintained across updates
 
 ### Added
+- **Retry logic for reads**: Automatically retries reading if content is empty or request fails
+  - Prevents false "content disappeared" logs due to temporary loading issues
+  - Retries up to 2 times with 2-second delays
+  - Significantly reduces false positives in change detection
 - Auto-update system (`-u` flag): Check for updates from GitHub while preserving all data
 - Current state snapshots in `data/` directory showing latest content per IP
 - Persistent loop mode that survives restarts
@@ -33,7 +37,7 @@ All notable changes to this project will be documented in this file.
 - Loop mode state tracking across IP changes
 - File organization for better user experience
 
-## [1.0.0] - 2024-12-08
+## [1.0.0]
 
 ### Initial Release
 - Scan ssavr.com and copy-paste.online through Tor exit nodes
