@@ -1,5 +1,23 @@
 everything written here is completely done by AI, even the readme.
-# 🔐 Tor Clipboard Scanner v2.0
+## 🆕 What's New in v3.0
+
+### Critical Bug Fixes
+- **🔴 Fixed session persistence bug** that was causing:
+  - "23 user agents" ban on copy-paste.online
+  - Phantom reads (seeing content from previous IPs)
+  - Cookie contamination across different exit nodes
+- **Fixed IP detection** with polling verification system
+- **Fixed index bug** (-i now correctly 1-based)
+- **Fixed text comparison** with clean_text() normalization
+
+### New Features
+- **Single IP mode** (`-s` flag) for testing specific exit nodes
+- **Configurable Tor ports** for using Tor Browser
+- **StrictNodes** enforcement for guaranteed IP consistency
+- **IPv6 support** with robust validation
+- **Debug logging** in `data/debug.log`
+
+# 🔐 Tor Clipboard Scanner v3.0
 
 A Python tool to scan and interact with clipboard sharing websites ([ssavr.com](https://www.ssavr.com) and [copy-paste.online](https://copy-paste.online)) through different Tor exit nodes.
 
@@ -92,9 +110,23 @@ python3 scanner.py
 
 It will ask for your Tor control password. **Important:** Enter the **plain text password** you chose in step 1, **NOT** the hash that starts with `16:...`
 
-You can choose to save it to `.tor_scanner_config.json` for future runs.
+You can choose to save it to `data/.tor_scanner_config.json` for future runs.
 
 **⚠️ Security Note:** The config file stores your password in plain text. Keep it secure and don't commit it to version control!
+
+### 4. Using Tor Browser (Alternative)
+
+If you want to use Tor Browser instead of system Tor:
+
+```bash
+# Tor Browser uses different ports: 9150 (SOCKS) and 9151 (Control)
+python3 scanner.py --socks-port 9150 --control-port 9151 [other options]
+
+# Test with curl
+curl --socks5-hostname 127.0.0.1:9150 https://ifconfig.co
+```
+
+**Note:** Tor Browser must be running and have Control Port enabled.
 
 ## 🔄 Updating
 
@@ -108,6 +140,36 @@ The script will:
 - Show you what changed
 - Preserve your configuration and log files
 - Ask for confirmation before updating
+
+## 🔧 Advanced Configuration
+
+### Disable Text Normalization
+
+To disable the text processing feature (no soft hyphen marker):
+
+```bash
+# Create empty file in data/ directory
+touch data/.disable_advanced_features
+
+# Verify it exists
+ls -la data/.disable_advanced_features
+```
+
+This file is automatically preserved during updates and never committed to git.
+
+### Debug Logging
+
+When things don't work as expected, check `data/debug.log`:
+
+```bash
+tail -f data/debug.log
+```
+
+This log contains:
+- Non-200 HTTP responses with headers
+- Rate limit detections
+- Exception details
+- IP verification attempts
 
 ## 📖 Usage
 
@@ -271,11 +333,16 @@ In loop mode (`-l`):
 ## 🎮 Command Line Arguments
 
 ```
+Advanced:
+  --socks-port N        Tor SOCKS port (default: 9050, Tor Browser: 9150)
+  --control-port N      Tor Control port (default: 9051, Tor Browser: 9151)
+
 Update system:
   -u, --update          Check for script updates from GitHub
 
 Reading options:
-  -i N, --index N       Start from exit node number N (default: 1)
+  -i N, --index N       Start from IP number N (1-based, e.g., -i 100 = IP #100)
+  -s N, --single N      Scan ONLY IP number N and stop (1-based, e.g., -s 139)
   -b, --randomize       Randomize exit node order
   -l, --loop            Continuous monitoring mode (persists across restarts)
 

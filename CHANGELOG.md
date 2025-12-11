@@ -2,7 +2,94 @@
 
 All notable changes to this project will be documented in this file.
 
-## [2.0.0]
+## [3.0.0] - 2024-12-10
+
+### 🔴 CRITICAL FIXES
+
+**Session Persistence Bug (MAJOR):**
+- **Fixed HTTP session reuse causing cookie/TCP persistence across different IPs**
+  - This was causing the "23 user agents" ban on copy-paste.online
+  - This was causing "phantom reads" where script saw content from previous IP
+  - Now creates fresh `requests.Session()` for each exit node change
+  - Eliminates cookie contamination and TCP socket reuse
+
+**IP Detection & Verification:**
+- **Fixed IP detection**: Now uses exit node IP directly + external verification
+  - Implements polling system to verify IP change (up to 30s timeout)
+  - Uses `ifconfig.co/ip` to confirm actual external IP
+  - Solves ssavr.com showing wrong IPs (255.x.x.x)
+  - More reliable and consistent IP tracking
+
+**Index Bug:**
+- **Fixed -i index**: Now correctly 1-based (e.g., `-i 139` starts from IP #139, not #140)
+- Fixed enumerate logic to match user expectations
+
+**Text Comparison:**
+- **Fixed content comparison**: Now uses `clean_text()` for all comparisons
+  - Removes soft hyphens, zero-width chars before comparison
+  - Prevents false "content changed" detections
+  - Consistent ownership detection
+
+### ✅ NEW FEATURES
+
+- **Single IP mode** (`-s` flag): Scan only one specific IP and stop
+  - Example: `python3 scanner.py -s 139` scans only exit node #139
+  - Cannot be combined with `-i`, `-l`, or `-b`
+
+- **Configurable Tor ports**: `--socks-port` and `--control-port`
+  - Allows using Tor Browser (ports 9150/9151) instead of system Tor
+  - Example: `python3 scanner.py --socks-port 9150 --control-port 9151`
+
+- **StrictNodes enforcement**: Forces Tor to use exact exit node or fail
+  - Prevents Tor from falling back to alternative nodes
+  - Guarantees IP consistency
+
+- **IPv6 support**: Robust IP extraction supporting both IPv4 and IPv6
+  - Uses `ipaddress` module for validation
+  - Handles dual-stack configurations
+
+- **Debug logging**: New `data/debug.log` file
+  - Logs anomalies (non-200 responses, rate limits, exceptions)
+  - Includes response headers and body snippets
+  - Helps diagnose site-specific issues
+
+- **Rate limit detection**: Automatically detects and logs anti-abuse messages
+  - Warns when copy-paste.online shows user-agent limit
+  - Logs to debug file for analysis
+
+### 🔧 TECHNICAL IMPROVEMENTS
+
+- **Simplified marker disable**: Just create empty file `data/.disable_advanced_features`
+  - No more SHA256 hash requirement
+  - Simple `os.path.exists()` check
+
+- **Improved retry logic**: Better handling of empty reads and failures
+  - Polls with delays between retries
+  - Distinguishes between empty content and connection failures
+
+- **Better error messages**: More descriptive validation errors
+
+- **1-second delay between sites**: Reduces rate limit triggers
+
+### 📝 DOCUMENTATION
+
+- Updated README with:
+  - Tor Browser mode usage
+  - How to disable text normalization
+  - IP verification polling explanation
+  - Debug logging location
+
+### 🐛 BUG FIXES SUMMARY
+
+1. ✅ Session reuse → Fresh session per exit node
+2. ✅ Cookie persistence → Cleared with each new session
+3. ✅ TCP keep-alive → New socket per exit node
+4. ✅ IP mismatches → Polling verification system
+5. ✅ Index off-by-one → Proper 1-based indexing
+6. ✅ Text comparison → Clean text normalization
+7. ✅ Marker disable → Simplified file check
+
+## [2.0.0] - 2024-12-10
 
 ### Major Changes
 - **Complete file reorganization**: 
@@ -37,7 +124,7 @@ All notable changes to this project will be documented in this file.
 - Loop mode state tracking across IP changes
 - File organization for better user experience
 
-## [1.0.0]
+## [1.0.0] - 2024-12-08
 
 ### Initial Release
 - Scan ssavr.com and copy-paste.online through Tor exit nodes

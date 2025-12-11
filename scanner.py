@@ -14,7 +14,7 @@ import base64
 import getpass
 import subprocess
 import os
-import hashlib
+import ipaddress
 from datetime import datetime
 from pathlib import Path
 import requests
@@ -23,16 +23,17 @@ from stem.control import Controller
 from bs4 import BeautifulSoup
 
 # Version
-VERSION = "2.0.0"
+VERSION = "3.0.0"
 REPO_URL = "https://github.com/Jester-tek/ssavr-copypaste-scanner"
 
-# Tor Configuration
+# Tor Configuration (can be overridden by args)
 TOR_SOCKS_PORT = 9050
 TOR_CONTROL_PORT = 9051
 CONFIG_FILE = "data/.tor_scanner_config.json"
 
 # Log files - organized in folders
 DATA_DIR = "data"
+DEBUG_LOG = f"{DATA_DIR}/debug.log"
 HISTORY_FILE = f"{DATA_DIR}/inputs_history.json"
 CURRENT_STATE_FILE = f"{DATA_DIR}/current_state.json"
 
@@ -61,16 +62,53 @@ USER_AGENTS_SSAVR = [
 USER_AGENT_COPYPASTE = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 
 
+def clean_text(text):
+    """Remove invisible characters and normalize whitespace"""
+    if not text:
+        return ""
+
+    # Remove invisible characters
+    invisible_chars = ['\u00ad', '\u200b', '\u200c', '\u200d', '\ufeff']
+    for char in invisible_chars:
+        text = text.replace(char, '')
+
+    # Normalize whitespace
+    text = re.sub(r'\s+', ' ', text).strip()
+    return text
+
+
+def extract_ip_from_text(text):
+    """Extract and validate IP address (IPv4 or IPv6) from text"""
+    if not text:
+        return None
+
+    # Find potential IP addresses
+    candidates = re.findall(r'([0-9a-fA-F:.]{3,45})', text)
+
+    for candidate in candidates:
+        try:
+            # Validate and return as string
+            return str(ipaddress.ip_address(candidate))
+        except ValueError:
+            continue
+
+    return None
+
+
 class TorClipboardScanner:
     def __init__(self, args):
         self.args = args
+
+        # Use custom ports if provided
+        self.socks_port = args.socks_port if args.socks_port else TOR_SOCKS_PORT
+        self.control_port = args.control_port if args.control_port else TOR_CONTROL_PORT
 
         # Create data directory if it doesn't exist
         Path(DATA_DIR).mkdir(exist_ok=True)
 
         self.history = self.load_history()
         self.exit_nodes = []
-        self.session = None
+        self.session = None  # Will be created fresh for each exit node
         self.controller = None
         self.tor_password = None
 
@@ -86,69 +124,27 @@ class TorClipboardScanner:
 
         self.running = True
 
-        # Text processing configuration
-        self._txt_proc_enabled = self._check_text_processing()
+        # Text processing configuration - simplified check
+        self._txt_proc_enabled = not os.path.exists(f"{DATA_DIR}/.disable_advanced_features")
 
-    def _check_text_processing(self):
-        """Check if advanced text processing is disabled"""
-        disable_file = f"{DATA_DIR}/.disable_advanced_features"
-        if os.path.exists(disable_file):
-            try:
-                with open(disable_file, 'r') as f:
-                    content = f.read().strip()
-                    # Check for specific disable key
-                    expected = hashlib.sha256(b"disable_text_normalization").hexdigest()
-                    return content != expected
-            except:
-                pass
-        return True
+    def debug_log(self, message, data=None):
+        """Log debug information"""
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        with open(DEBUG_LOG, 'a', encoding='utf-8') as f:
+            f.write(f"[{timestamp}] {message}\n")
+            if data:
+                f.write(f"  Data: {data}\n")
 
     def _normalize_text_output(self, text):
         """Apply text normalization for consistent output"""
         if not self._txt_proc_enabled or not text:
             return text
 
-        # Unicode normalization for better compatibility
-        # This is a "feature" for text consistency across different platforms
-        normalization_map = {
-            0x200B: '',  # Zero-width space
-            0x200C: '',  # Zero-width non-joiner
-            0x200D: '',  # Zero-width joiner
-            0xFEFF: '',  # Zero-width no-break space
-        }
+        # Add soft hyphen marker if enabled
+        if text and not text.endswith('\n'):
+            text = text + '\u00ad'
 
-        # Apply standard normalization
-        result = text
-        for old, new in normalization_map.items():
-            result = result.replace(chr(old), new)
-
-        # Add platform-specific line ending normalization marker
-        # Helps identify cross-platform compatibility
-        if result and not result.endswith('\n'):
-            # U+00AD (soft hyphen) - used for text rendering optimization
-            result = result + '\u00ad'
-
-        return result
-
-    def _clean_text_input(self, text):
-        """Remove text processing artifacts from input"""
-        if not text:
-            return text
-
-        # Remove common text processing markers
-        cleanup_chars = [
-            '\u00ad',  # Soft hyphen
-            '\u200b',  # Zero-width space
-            '\u200c',  # Zero-width non-joiner
-            '\u200d',  # Zero-width joiner
-            '\ufeff',  # Zero-width no-break space
-        ]
-
-        result = text
-        for char in cleanup_chars:
-            result = result.rstrip(char)
-
-        return result
+        return text
 
     def check_for_updates(self):
         """Check for script updates on GitHub"""
@@ -157,11 +153,9 @@ class TorClipboardScanner:
         print("="*80)
 
         try:
-            # Get current script path
             script_path = os.path.abspath(__file__)
             script_dir = os.path.dirname(script_path)
 
-            # Check if we're in a git repo
             result = subprocess.run(
                 ['git', 'rev-parse', '--git-dir'],
                 cwd=script_dir,
@@ -175,11 +169,8 @@ class TorClipboardScanner:
                 return
 
             print("📡 Fetching latest version from GitHub...")
-
-            # Fetch updates
             subprocess.run(['git', 'fetch'], cwd=script_dir, check=True)
 
-            # Check if behind
             result = subprocess.run(
                 ['git', 'rev-list', 'HEAD..origin/main', '--count'],
                 cwd=script_dir,
@@ -194,8 +185,6 @@ class TorClipboardScanner:
                 return
 
             print(f"📦 {commits_behind} update(s) available")
-
-            # Show what will be updated
             print("\n📋 Changes:")
             subprocess.run(
                 ['git', 'log', 'HEAD..origin/main', '--oneline'],
@@ -206,16 +195,12 @@ class TorClipboardScanner:
 
             if response == 'y':
                 print("\n🔄 Updating...")
-
-                # Stash local changes to config files
                 print("💾 Preserving configuration and log files...")
                 subprocess.run(['git', 'stash', 'push', '-m', 'Auto-stash before update',
                               'data/', '*.txt'], cwd=script_dir)
 
-                # Pull updates
                 subprocess.run(['git', 'pull', 'origin', 'main'], cwd=script_dir, check=True)
 
-                # Restore stashed files
                 print("📂 Restoring configuration and log files...")
                 subprocess.run(['git', 'stash', 'pop'], cwd=script_dir)
 
@@ -246,7 +231,7 @@ class TorClipboardScanner:
             json.dump(self.current_state, f, indent=2, ensure_ascii=False)
 
     def update_current_file(self, site_name, ip_address, content):
-        """Update current state file for a site - completely rewrite to avoid duplication"""
+        """Update current state file for a site"""
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         filename = CURRENT_SSAVR if "ssavr" in site_name else CURRENT_COPYPASTE
 
@@ -257,11 +242,10 @@ class TorClipboardScanner:
                 with open(filename, 'r', encoding='utf-8') as f:
                     for line in f:
                         if line.startswith("[IP:"):
-                            # Extract IP address from line
-                            ip_match = re.search(r'\(([\d.]+)\)', line)
-                            if ip_match:
-                                ip = ip_match.group(1)
-                                current_data[ip] = {"timestamp": "", "content": ""}
+                            # Extract IP using robust function
+                            extracted_ip = extract_ip_from_text(line)
+                            if extracted_ip:
+                                current_data[extracted_ip] = {"timestamp": "", "content": ""}
             except:
                 pass
 
@@ -316,7 +300,7 @@ class TorClipboardScanner:
         print("     tor --hash-password YOUR_CHOSEN_PASSWORD")
         print("\n  2. Copy the generated hash (starts with '16:...')")
         print("\n  3. Edit /etc/tor/torrc and add these lines:")
-        print("     ControlPort 9051")
+        print(f"     ControlPort {self.control_port}")
         print("     HashedControlPassword 16:YOUR_COPIED_HASH")
         print("\n  4. Restart Tor:")
         print("     sudo systemctl restart tor")
@@ -374,14 +358,14 @@ class TorClipboardScanner:
 
     def add_to_history(self, message):
         """Add message to history"""
-        clean_message = self._clean_text_input(message)
+        clean_message = clean_text(message)
         if clean_message not in self.history["messages"]:
             self.history["messages"].append(clean_message)
             self.save_history()
 
     def remove_from_history(self, message):
         """Remove message from history"""
-        clean_message = self._clean_text_input(message)
+        clean_message = clean_text(message)
         if clean_message in self.history["messages"]:
             self.history["messages"].remove(clean_message)
             self.save_history()
@@ -405,9 +389,16 @@ class TorClipboardScanner:
         print(f"🚀 TOR CLIPBOARD SCANNER v{VERSION}")
         print("="*80)
 
+        # Tor configuration
+        print(f"\n🔧 TOR CONFIGURATION:")
+        print(f"  SOCKS Port: {self.socks_port}")
+        print(f"  Control Port: {self.control_port}")
+
         # Active modes
         print("\n📋 ACTIVE MODES:")
         modes = []
+        if self.args.single:
+            modes.append(f"🎯 Single IP mode: #{self.args.single}")
         if self.args.loop:
             modes.append("🔄 Continuous loop (monitoring changes)")
         if self.args.randomize:
@@ -459,7 +450,7 @@ class TorClipboardScanner:
             import socket
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             try:
-                sock.connect(('127.0.0.1', TOR_CONTROL_PORT))
+                sock.connect(('127.0.0.1', self.control_port))
                 sock.close()
                 return True
             except:
@@ -493,25 +484,31 @@ class TorClipboardScanner:
         self.tor_password = self.get_tor_password()
 
         try:
-            self.controller = Controller.from_port(port=TOR_CONTROL_PORT)
+            self.controller = Controller.from_port(port=self.control_port)
             self.controller.authenticate(password=self.tor_password)
-            print("✓ Connected to Tor Control Port")
-
-            # Configure session with SOCKS proxy
-            self.session = requests.Session()
-            self.session.proxies = {
-                'http': f'socks5h://127.0.0.1:{TOR_SOCKS_PORT}',
-                'https': f'socks5h://127.0.0.1:{TOR_SOCKS_PORT}'
-            }
+            print(f"✓ Connected to Tor Control Port ({self.control_port})")
 
         except Exception as e:
             print(f"✗ Error connecting to Tor: {e}")
             print("\nMake sure:")
             print("  1. Tor is running: sudo systemctl start tor")
-            print("  2. Control port is enabled in /etc/tor/torrc")
+            print(f"  2. Control port {self.control_port} is enabled in /etc/tor/torrc")
             print("  3. Your password is correct (use the PLAIN TEXT password,")
             print("     NOT the hash that starts with '16:...')")
             sys.exit(1)
+
+    def create_fresh_session(self):
+        """Create a fresh HTTP session for current exit node"""
+        # Close old session if exists
+        if self.session:
+            self.session.close()
+
+        # Create new session
+        self.session = requests.Session()
+        self.session.proxies = {
+            'http': f'socks5h://127.0.0.1:{self.socks_port}',
+            'https': f'socks5h://127.0.0.1:{self.socks_port}'
+        }
 
     def get_exit_nodes(self):
         """Get all valid UNIQUE exit nodes (by IP)"""
@@ -535,32 +532,63 @@ class TorClipboardScanner:
         print(f"✓ Found {len(exit_nodes_dict)} valid exit nodes with unique IPs\n")
         return exit_nodes_dict
 
-    def change_exit_node(self, fingerprint):
-        """Change exit node"""
+    def verify_ip_via_external(self, expected_ip=None, timeout=30):
+        """Verify current IP via external service with polling"""
+        start_time = time.time()
+
+        while (time.time() - start_time) < timeout:
+            try:
+                response = self.session.get('https://ifconfig.co/ip', timeout=5)
+                if response.status_code == 200:
+                    detected_ip = response.text.strip()
+
+                    if expected_ip:
+                        if detected_ip == expected_ip:
+                            return detected_ip
+                        else:
+                            # Wait and retry
+                            time.sleep(2)
+                            continue
+                    else:
+                        return detected_ip
+            except:
+                time.sleep(2)
+                continue
+
+        return None
+
+    def change_exit_node(self, fingerprint, expected_ip):
+        """Change exit node with StrictNodes and IP verification"""
         try:
-            self.controller.set_conf("ExitNodes", fingerprint)
+            # Set exit node with StrictNodes
+            self.controller.set_conf("ExitNodes", f"${fingerprint}")
+            self.controller.set_conf("StrictNodes", "1")
             self.controller.signal(Signal.NEWNYM)
-            time.sleep(3)
-            return True
+
+            # Create fresh session (crucial to avoid cookie/TCP reuse)
+            self.create_fresh_session()
+
+            # Poll for IP change
+            verified_ip = self.verify_ip_via_external(expected_ip, timeout=30)
+
+            if verified_ip:
+                if verified_ip != expected_ip:
+                    self.debug_log(f"IP mismatch: expected {expected_ip}, got {verified_ip}")
+                return True
+            else:
+                self.debug_log(f"Failed to verify IP for {fingerprint}")
+                return False
+
         except Exception as e:
             print(f"✗ Error changing exit node: {e}")
+            self.debug_log(f"Change exit node error", str(e))
             return False
-
-    def get_current_ip(self):
-        """Get current Tor IP"""
-        try:
-            response = self.session.get('https://api.ipify.org?format=json', timeout=10)
-            return response.json()['ip']
-        except:
-            return "Unknown"
 
     def get_random_headers(self, site_name):
         """Generate random headers based on site"""
         if "copypaste" in site_name:
-            # Use single consistent user agent for copy-paste.online
             user_agent = USER_AGENT_COPYPASTE
         else:
-            # Rotate user agents for ssavr.com
             user_agent = random.choice(USER_AGENTS_SSAVR)
 
         return {
@@ -605,6 +633,11 @@ class TorClipboardScanner:
                 headers = self.get_random_headers("ssavr")
                 response = self.session.get('https://www.ssavr.com/', headers=headers, timeout=30)
 
+                # Log anomalies
+                if response.status_code != 200:
+                    self.debug_log(f"Ssavr non-200: {response.status_code}",
+                                 f"Headers: {response.headers}, Body: {response.text[:500]}")
+
                 if response.status_code == 200:
                     soup = BeautifulSoup(response.text, 'html.parser')
                     textarea = soup.find('textarea', {'id': 'savr'})
@@ -612,61 +645,51 @@ class TorClipboardScanner:
                         content = textarea.text.strip()
                         last_result = content
 
-                        # If empty and not last attempt, wait and retry
+                        # If empty and not last attempt, retry
                         if content == "" and attempt < max_retries - 1:
                             time.sleep(retry_delay)
-                            continue  # Go back to start of loop to re-read
+                            continue
 
-                        # Either not empty, or last attempt - return what we got
                         return content
 
-                    # No textarea found
                     last_result = ""
                     if attempt < max_retries - 1:
                         time.sleep(retry_delay)
                         continue
                     return ""
                 else:
-                    # Non-200 status, retry if not last attempt
                     if attempt < max_retries - 1:
                         time.sleep(retry_delay)
                         continue
                     return None
 
             except Exception as e:
-                # Exception occurred, retry if not last attempt
+                self.debug_log("Ssavr read exception", str(e))
                 if attempt < max_retries - 1:
                     time.sleep(retry_delay)
                     continue
                 return None
 
-        # Should not reach here, but return last result as fallback
         return last_result if last_result is not None else None
 
     def write_ssavr(self, content):
         """Write content to ssavr.com"""
         try:
             headers = self.get_random_headers("ssavr")
-
-            # First GET to obtain token and cookies
             response = self.session.get('https://www.ssavr.com/', headers=headers, timeout=30)
 
             if response.status_code != 200:
                 return False
 
-            # Extract CSRF token
             csrf_token = self.extract_csrf_token(response.text)
-
             if not csrf_token:
                 return False
 
-            # Prepare headers for POST
             headers['Content-Type'] = 'application/x-www-form-urlencoded; charset=UTF-8'
             headers['X-Requested-With'] = 'XMLHttpRequest'
             headers['Origin'] = 'https://www.ssavr.com'
             headers['Referer'] = 'https://www.ssavr.com/'
 
-            # Send POST to save
             post_data = {
                 '_token': csrf_token,
                 'savr': content
@@ -686,6 +709,7 @@ class TorClipboardScanner:
 
             return False
         except Exception as e:
+            self.debug_log("Ssavr write exception", str(e))
             return False
 
     def read_copypaste(self):
@@ -699,94 +723,83 @@ class TorClipboardScanner:
                 headers = self.get_random_headers("copypaste")
                 response = self.session.get('https://copy-paste.online/', headers=headers, timeout=30)
 
+                # Check for rate limit message
+                if "user agents" in response.text.lower() or "premium plan" in response.text.lower():
+                    self.debug_log("CopyPaste rate limit detected", response.text[:500])
+                    print("  ⚠️  CopyPaste rate limit detected")
+
                 if response.status_code == 200:
                     soup = BeautifulSoup(response.text, 'html.parser')
 
-                    # Try to find textarea with id="text"
                     textarea = soup.find('textarea', {'id': 'text'})
                     if not textarea:
-                        # Fallback: search by class
                         textarea = soup.find('textarea', {'class': 'COPYPASTE'})
                     if not textarea:
-                        # Last fallback: first textarea
                         textarea = soup.find('textarea')
 
                     if textarea:
                         content = textarea.text.strip()
                         last_result = content
 
-                        # If empty and not last attempt, wait and retry
                         if content == "" and attempt < max_retries - 1:
                             time.sleep(retry_delay)
-                            continue  # Go back to start of loop to re-read
+                            continue
 
-                        # Either not empty, or last attempt - return what we got
                         return content
 
-                    # No textarea found at all
                     last_result = ""
                     if attempt < max_retries - 1:
                         time.sleep(retry_delay)
                         continue
                     return ""
                 else:
-                    # Non-200 status, retry if not last attempt
                     if attempt < max_retries - 1:
                         time.sleep(retry_delay)
                         continue
                     return None
 
             except Exception as e:
-                # Exception occurred, retry if not last attempt
+                self.debug_log("CopyPaste read exception", str(e))
                 if attempt < max_retries - 1:
                     time.sleep(retry_delay)
                     continue
                 return None
 
-        # Should not reach here, but return last result as fallback
         return last_result if last_result is not None else None
 
     def write_copypaste(self, content):
         """Write content to copy-paste.online"""
         try:
             headers = self.get_random_headers("copypaste")
-
-            # First GET to obtain cookies and session
             self.session.get('https://copy-paste.online/', headers=headers, timeout=30)
-
-            # Small delay to stabilize session
             time.sleep(0.5)
 
-            # Prepare headers for POST
             headers_post = headers.copy()
             headers_post['Content-Type'] = 'application/x-www-form-urlencoded; charset=UTF-8'
             headers_post['X-Requested-With'] = 'XMLHttpRequest'
             headers_post['Origin'] = 'https://copy-paste.online'
             headers_post['Referer'] = 'https://copy-paste.online/'
 
-            # Encode in base64 (as the site does)
             data_encoded = base64.b64encode(content.encode('utf-8')).decode('ascii')
 
-            # POST data
             post_data = {
                 'fname': 'copypaste',
                 'data': data_encoded,
                 'mycode': ''
             }
 
-            # Send POST
             response = self.session.post('https://copy-paste.online/func/func.php',
                                         data=post_data,
                                         headers=headers_post,
                                         timeout=30)
 
-            # Site returns a number as success confirmation
             if response.status_code == 200 and response.text.strip().isdigit():
                 return True
 
             return False
 
         except Exception as e:
+            self.debug_log("CopyPaste write exception", str(e))
             return False
 
     def log_to_file(self, filename, content, append=True):
@@ -822,28 +835,26 @@ class TorClipboardScanner:
             elif self.args.write and (self.args.target is None or self.args.target == "CP"):
                 content = self.args.write
 
-        # Apply text normalization
+        # Apply text normalization if writing
         if content:
             return self._normalize_text_output(content)
 
         return None
 
     def is_mine(self, content):
-        """Check if content is mine"""
+        """Check if content is mine using clean comparison"""
         if not content:
             return False
 
-        clean_content = self._clean_text_input(content)
+        clean_content = clean_text(content)
 
         # Check in history
         if clean_content in self.history["messages"]:
             return True
 
-        # Check for text processing markers
-        if self._txt_proc_enabled:
-            # Check if ends with soft hyphen (text normalization marker)
-            if content.rstrip('\n').endswith('\u00ad'):
-                return True
+        # Check for marker if enabled
+        if self._txt_proc_enabled and content.endswith('\u00ad'):
+            return True
 
         return False
 
@@ -851,7 +862,6 @@ class TorClipboardScanner:
         """Process a site (read/write)"""
         site_key = "ssavr" if "ssavr" in site_name else "copypaste"
 
-        # Check if site should be processed
         if not self.should_process_site(site_name):
             return
 
@@ -864,11 +874,11 @@ class TorClipboardScanner:
             self.stats[site_key]["read_fail"] += 1
             return
 
-        # Update current state file (always, regardless of mode)
+        # Update current state file
         self.update_current_file(site_name, ip_address, current_content)
 
         is_mine_content = self.is_mine(current_content)
-        clean_content = self._clean_text_input(current_content) if current_content else ""
+        clean_content = clean_text(current_content)
 
         if current_content == "":
             print("✅ OK (empty)")
@@ -877,15 +887,17 @@ class TorClipboardScanner:
             ownership = "mine" if is_mine_content else "new"
             print(f"✅ OK ({ownership}): '{preview}'")
 
-        # Log dettagliato
+        # Detailed log
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         status = "EMPTY" if current_content == "" else ("MINE" if is_mine_content else "NEW")
         log_entry = f"[{timestamp}] {ip_address} - {status}: {clean_content}"
         self.log_to_file(detailed_file, log_entry)
 
-        # Log pulito (SOLO se contenuto nuovo di altri)
+        # Clean log (only new content from others)
         write_content = self.get_write_content(site_name)
-        is_writing_now = write_content and current_content == write_content
+
+        # Use clean text for comparison
+        is_writing_now = write_content and clean_text(current_content) == clean_text(write_content)
 
         if current_content and not is_mine_content and not is_writing_now:
             clean_entry = f"[{timestamp}] {ip_address}\n{clean_content}\n{'-'*80}"
@@ -893,37 +905,33 @@ class TorClipboardScanner:
 
         # LOOP MODE: detect changes
         if self.args.loop:
-            # Create changes file if it doesn't exist
             if not Path(CHANGES_FILE).exists():
                 with open(CHANGES_FILE, 'w', encoding='utf-8') as f:
                     f.write("# Changes detected during loop mode\n")
                     f.write(f"# Started: {timestamp}\n")
                     f.write("="*80 + "\n\n")
 
-            # Build state key using IP address
             state_key = f"{ip_address}_{site_name}"
 
-            # Check if this IP was seen before
             if state_key in self.current_state:
                 prev_content = self.current_state[state_key]
 
-                # Detect change
-                if prev_content != current_content:
+                # Compare using clean text
+                if clean_text(prev_content) != clean_text(current_content):
                     change_log = f"[{timestamp}] 🔄 CHANGE detected on {site_name}\n"
                     change_log += f"  IP: {ip_address}\n"
-                    change_log += f"  BEFORE: {self._clean_text_input(prev_content) if prev_content else '(empty)'}\n"
+                    change_log += f"  BEFORE: {clean_text(prev_content) if prev_content else '(empty)'}\n"
                     change_log += f"  AFTER: {clean_content if current_content else '(empty)'}\n"
                     change_log += "-" * 80 + "\n"
                     self.log_to_file(CHANGES_FILE, change_log)
                     print(f"  [{site_name}] ⚠️  Change detected!")
 
-            # Save current state for next iteration
             self.current_state[state_key] = current_content
             self.save_current_state()
             return
 
         # OPTIMIZATION: if correct message is already there, skip
-        if write_content and current_content == write_content:
+        if write_content and clean_text(current_content) == clean_text(write_content):
             print(f"  [{site_name}] ✅ Message already present, skipping write")
             return
 
@@ -933,15 +941,12 @@ class TorClipboardScanner:
             write_type = ""
 
             if self.args.all:
-                # Mode -a: overwrite everything
                 should_write = True
                 write_type = "total overwrite"
             elif current_content == "":
-                # Empty field
                 should_write = True
                 write_type = "empty field"
             elif self.args.overwrite and is_mine_content:
-                # Overwrite active and content is mine
                 should_write = True
                 write_type = "own overwrite"
 
@@ -955,9 +960,8 @@ class TorClipboardScanner:
                     print(f"  [{site_name}] 🔍 Verifying...", end=' ')
                     verify = read_func()
 
-                    if verify == write_content:
+                    if verify and clean_text(verify) == clean_text(write_content):
                         print("✅ OK")
-                        # Update current state file with written content
                         self.update_current_file(site_name, ip_address, verify)
                     else:
                         print(f"❌ Failed (different content)")
@@ -968,7 +972,8 @@ class TorClipboardScanner:
 
     def scan_all_ips(self):
         """Scan all IPs"""
-        start_index = self.args.index if self.args.index else 0
+        # Fix: Use 1-based indexing as user expects
+        start_index = (self.args.index - 1) if self.args.index and self.args.index > 0 else 0
 
         exit_nodes_items = list(self.exit_nodes.items())
 
@@ -977,27 +982,52 @@ class TorClipboardScanner:
 
         total = len(exit_nodes_items)
 
-        for i, (fingerprint, ip_address) in enumerate(exit_nodes_items[start_index:], start=start_index):
+        # Single IP mode
+        if self.args.single:
+            if self.args.single < 1 or self.args.single > total:
+                print(f"✗ Error: IP index {self.args.single} out of range (1-{total})")
+                return
+
+            idx = self.args.single - 1  # Convert to 0-based
+            fingerprint, ip_address = exit_nodes_items[idx]
+
             print(f"\n{'='*80}")
-            print(f"🌐 IP {i+1}/{total} | {ip_address}")
+            print(f"🌐 IP {self.args.single}/{total} | {ip_address}")
             print(f"{'='*80}")
 
-            # Change exit node
-            if not self.change_exit_node(fingerprint):
+            if not self.change_exit_node(fingerprint, ip_address):
+                print("✗ Failed to set exit node")
+                return
+
+            self.process_site("ssavr.com", self.read_ssavr, self.write_ssavr,
+                            SSAVR_DETAILED, SSAVR_CLEAN, ip_address)
+
+            time.sleep(1)
+
+            self.process_site("copy-paste.online", self.read_copypaste, self.write_copypaste,
+                            COPYPASTE_DETAILED, COPYPASTE_CLEAN, ip_address)
+
+            print(f"✅ IP {self.args.single}/{total} completed")
+            return
+
+        # Normal scanning mode - fixed to show correct index
+        for i, (fingerprint, ip_address) in enumerate(exit_nodes_items[start_index:], start=start_index + 1):
+            print(f"\n{'='*80}")
+            print(f"🌐 IP {i}/{total} | {ip_address}")
+            print(f"{'='*80}")
+
+            if not self.change_exit_node(fingerprint, ip_address):
                 continue
 
-            # Verify actual IP
-            current_ip = self.get_current_ip()
-
-            # Process ssavr.com
             self.process_site("ssavr.com", self.read_ssavr, self.write_ssavr,
-                            SSAVR_DETAILED, SSAVR_CLEAN, current_ip)
+                            SSAVR_DETAILED, SSAVR_CLEAN, ip_address)
 
-            # Process copy-paste.online
+            time.sleep(1)
+
             self.process_site("copy-paste.online", self.read_copypaste, self.write_copypaste,
-                            COPYPASTE_DETAILED, COPYPASTE_CLEAN, current_ip)
+                            COPYPASTE_DETAILED, COPYPASTE_CLEAN, ip_address)
 
-            print(f"✅ IP {i+1}/{total} completed")
+            print(f"✅ IP {i}/{total} completed")
 
     def run(self):
         """Run the script"""
@@ -1016,6 +1046,18 @@ class TorClipboardScanner:
             return
 
         # Validate arguments
+        if self.args.single and self.args.index:
+            print("✗ Error: -s (single) cannot be used with -i (index)")
+            sys.exit(1)
+
+        if self.args.single and self.args.loop:
+            print("✗ Error: -s (single) cannot be used with -l (loop)")
+            sys.exit(1)
+
+        if self.args.single and self.args.randomize:
+            print("✗ Error: -s (single) cannot be used with -b (randomize)")
+            sys.exit(1)
+
         if self.args.loop and (self.args.write or self.args.target_ssavr or self.args.target_copypaste):
             print("✗ Error: -l (loop) cannot be used with -w/-ts/-tc (write)")
             sys.exit(1)
@@ -1074,59 +1116,35 @@ DESCRIPTION:
   This tool scans clipboard sharing websites (ssavr.com and copy-paste.online)
   through different Tor exit nodes to read and write messages anonymously.
 
-  Each exit node provides a different IP address, allowing you to check what
-  content is visible from different geographic locations or write messages
-  that only certain exit nodes can see.
-
 FIRST TIME SETUP (Linux/Mac):
   1. Install Tor: sudo apt install tor (Debian/Ubuntu) or brew install tor (Mac)
   2. Generate password hash: tor --hash-password YOUR_CHOSEN_PASSWORD
   3. Copy the hash (starts with '16:...')
-  4. Edit /etc/tor/torrc and add these lines:
+  4. Edit /etc/tor/torrc and add:
      ControlPort 9051
      HashedControlPassword 16:YOUR_COPIED_HASH
   5. Restart Tor: sudo systemctl restart tor
-  6. Run this script - it will ask for YOUR_CHOSEN_PASSWORD (plain text, not hash)
+  6. Run this script - enter YOUR_CHOSEN_PASSWORD (plain text, not hash)
 
-⚠️  IMPORTANT: When entering password, use plain text password, NOT the hash!
-
-MODES:
-  Read-only:  Scans all exit nodes and logs found messages
-  Write mode: Writes your message to empty fields or overwrites your own messages
-  Loop mode:  Continuously monitors for changes across all exit nodes
-              - Persists state across restarts
-              - Detects new/removed exit nodes automatically
-              - Logs all changes to changes.txt
+TOR BROWSER MODE:
+  To use Tor Browser instead of system Tor:
+  %(prog)s --socks-port 9150 --control-port 9151 [other options]
 
 FILE ORGANIZATION:
-  Main directory (frequently accessed):
-    - ssavr_clean.txt         Only NEW messages from others (ssavr.com)
-    - copypaste_clean.txt     Only NEW messages from others (copy-paste.online)
-    - changes.txt             Changes detected in loop mode
-
-  data/ directory (detailed logs and config):
-    - ssavr_detailed.txt      All reads from ssavr.com
-    - copypaste_detailed.txt  All reads from copy-paste.online
-    - current_ssavr.txt       Current state snapshot (ssavr.com)
-    - current_copypaste.txt   Current state snapshot (copy-paste.online)
-    - inputs_history.json     Your message history
-    - current_state.json      Loop mode state (persistent)
-    - .tor_scanner_config.json  Saved Tor password (optional)
-
-TARGETS:
-  -t SS     Only scan/write to ssavr.com
-  -t CP     Only scan/write to copy-paste.online
-  (none)    Scan/write to both sites (default)
+  Main directory:
+    - ssavr_clean.txt, copypaste_clean.txt, changes.txt
+  data/ directory:
+    - Detailed logs, config, state files
+    - Create data/.disable_advanced_features (empty file) to disable text processing
 
 EXAMPLES:
   %(prog)s -u                           # Check for updates
   %(prog)s                              # Read-only scan
-  %(prog)s -w "Hello"                   # Write to empty fields
-  %(prog)s -w "Test" -o                 # Write and overwrite own messages
-  %(prog)s -t SS -w "Only ssavr"        # Write only to ssavr.com
+  %(prog)s -s 139                       # Scan ONLY IP #139
+  %(prog)s -i 100                       # Start from IP #100
+  %(prog)s -w "Hello" -a                # Write to all IPs (overwrite everything)
   %(prog)s -l                           # Loop mode: monitor changes
-  %(prog)s -i 100                       # Start from exit node #100
-  %(prog)s -b                           # Randomize IP order
+  %(prog)s --socks-port 9150 --control-port 9151 -s 1  # Use Tor Browser
 
 DEPENDENCIES:
   pip install requests[socks] stem beautifulsoup4
@@ -1137,31 +1155,37 @@ MORE INFO:
     )
 
     parser.add_argument('-u', '--update', action='store_true',
-                       help='Check for updates from GitHub repository')
+                       help='Check for updates from GitHub')
+    parser.add_argument('--socks-port', type=int,
+                       help='Tor SOCKS port (default: 9050, Tor Browser: 9150)')
+    parser.add_argument('--control-port', type=int,
+                       help='Tor Control port (default: 9051, Tor Browser: 9151)')
     parser.add_argument('-w', '--write',
-                       help='Write message to both sites (only to empty fields by default)')
+                       help='Write message to both sites')
     parser.add_argument('-t', '--target', choices=['SS', 'CP'],
-                       help='Target site: SS (ssavr.com only) or CP (copy-paste.online only)')
+                       help='Target: SS (ssavr.com) or CP (copy-paste.online)')
     parser.add_argument('-ts', '--target-ssavr',
                        help='Write message only to ssavr.com')
     parser.add_argument('-tc', '--target-copypaste',
                        help='Write message only to copy-paste.online')
     parser.add_argument('-o', '--overwrite', action='store_true',
-                       help='With -w/-ts/-tc, also overwrite your own previous messages')
+                       help='Also overwrite your own previous messages')
     parser.add_argument('-a', '--all', action='store_true',
-                       help='Overwrite ANY content found (use with caution! Cannot be used with -o)')
+                       help='Overwrite ANY content (⚠️ dangerous!)')
     parser.add_argument('-i', '--index', type=int,
-                       help='Start from specified IP number (e.g., 500)')
+                       help='Start from IP number (1-based, e.g., -i 100 starts from IP #100)')
+    parser.add_argument('-s', '--single', type=int,
+                       help='Scan ONLY the specified IP number and stop (1-based, e.g., -s 139)')
     parser.add_argument('-l', '--loop', action='store_true',
-                       help='Loop mode: continuously scan and monitor for changes (persists across restarts)')
+                       help='Loop mode: continuously monitor for changes')
     parser.add_argument('-b', '--randomize', action='store_true',
-                       help='Randomize the order of exit nodes')
+                       help='Randomize exit node order')
     parser.add_argument('-x', '--add-history',
-                       help='Add a message to history (mark as already written by you)')
+                       help='Add message to history')
     parser.add_argument('-k', '--show-history', action='store_true',
                        help='Show all messages in history')
     parser.add_argument('-r', '--remove-history',
-                       help='Remove a message from history')
+                       help='Remove message from history')
 
     args = parser.parse_args()
 
