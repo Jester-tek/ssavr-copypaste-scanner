@@ -598,6 +598,7 @@ class TorClipboardScanner:
         """Read content from ssavr.com with retry logic"""
         max_retries = 2
         retry_delay = 2
+        last_result = None
 
         for attempt in range(max_retries):
             try:
@@ -609,28 +610,38 @@ class TorClipboardScanner:
                     textarea = soup.find('textarea', {'id': 'savr'})
                     if textarea:
                         content = textarea.text.strip()
+                        last_result = content
 
-                        # If empty and not last attempt, retry to confirm
+                        # If empty and not last attempt, wait and retry
                         if content == "" and attempt < max_retries - 1:
                             time.sleep(retry_delay)
-                            continue
+                            continue  # Go back to start of loop to re-read
 
+                        # Either not empty, or last attempt - return what we got
                         return content
+
+                    # No textarea found
+                    last_result = ""
+                    if attempt < max_retries - 1:
+                        time.sleep(retry_delay)
+                        continue
                     return ""
+                else:
+                    # Non-200 status, retry if not last attempt
+                    if attempt < max_retries - 1:
+                        time.sleep(retry_delay)
+                        continue
+                    return None
 
-                # If non-200 status and not last attempt, retry
-                if attempt < max_retries - 1:
-                    time.sleep(retry_delay)
-                    continue
-
-                return None
             except Exception as e:
+                # Exception occurred, retry if not last attempt
                 if attempt < max_retries - 1:
                     time.sleep(retry_delay)
                     continue
                 return None
 
-        return None
+        # Should not reach here, but return last result as fallback
+        return last_result if last_result is not None else None
 
     def write_ssavr(self, content):
         """Write content to ssavr.com"""
@@ -681,66 +692,59 @@ class TorClipboardScanner:
         """Read content from copy-paste.online with retry logic"""
         max_retries = 2
         retry_delay = 2
+        last_result = None
 
         for attempt in range(max_retries):
             try:
                 headers = self.get_random_headers("copypaste")
-
-                # GET to obtain page
                 response = self.session.get('https://copy-paste.online/', headers=headers, timeout=30)
 
                 if response.status_code == 200:
                     soup = BeautifulSoup(response.text, 'html.parser')
 
-                    # Site uses id="text" and class="COPYPASTE"
+                    # Try to find textarea with id="text"
                     textarea = soup.find('textarea', {'id': 'text'})
+                    if not textarea:
+                        # Fallback: search by class
+                        textarea = soup.find('textarea', {'class': 'COPYPASTE'})
+                    if not textarea:
+                        # Last fallback: first textarea
+                        textarea = soup.find('textarea')
+
                     if textarea:
                         content = textarea.text.strip()
+                        last_result = content
 
-                        # If empty and not last attempt, retry to confirm
+                        # If empty and not last attempt, wait and retry
                         if content == "" and attempt < max_retries - 1:
                             time.sleep(retry_delay)
-                            continue
+                            continue  # Go back to start of loop to re-read
 
+                        # Either not empty, or last attempt - return what we got
                         return content
 
-                    # Fallback: search by class
-                    textarea = soup.find('textarea', {'class': 'COPYPASTE'})
-                    if textarea:
-                        content = textarea.text.strip()
-
-                        if content == "" and attempt < max_retries - 1:
-                            time.sleep(retry_delay)
-                            continue
-
-                        return content
-
-                    # Last fallback: first textarea
-                    textarea = soup.find('textarea')
-                    if textarea:
-                        content = textarea.text.strip()
-
-                        if content == "" and attempt < max_retries - 1:
-                            time.sleep(retry_delay)
-                            continue
-
-                        return content
-
+                    # No textarea found at all
+                    last_result = ""
+                    if attempt < max_retries - 1:
+                        time.sleep(retry_delay)
+                        continue
                     return ""
+                else:
+                    # Non-200 status, retry if not last attempt
+                    if attempt < max_retries - 1:
+                        time.sleep(retry_delay)
+                        continue
+                    return None
 
-                # If non-200 status and not last attempt, retry
-                if attempt < max_retries - 1:
-                    time.sleep(retry_delay)
-                    continue
-
-                return None
             except Exception as e:
+                # Exception occurred, retry if not last attempt
                 if attempt < max_retries - 1:
                     time.sleep(retry_delay)
                     continue
                 return None
 
-        return None
+        # Should not reach here, but return last result as fallback
+        return last_result if last_result is not None else None
 
     def write_copypaste(self, content):
         """Write content to copy-paste.online"""
