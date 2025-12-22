@@ -1,137 +1,141 @@
 # Changelog
 
-All notable changes to this project will be documented in this file.
+All notable changes to Tor Clipboard Scanner will be documented in this file.
 
-## [3.0.0] - 2024-12-10
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-### 🔴 CRITICAL FIXES
+## [4.0.0] - 2024-12-22
 
-**Session Persistence Bug (MAJOR):**
-- **Fixed HTTP session reuse causing cookie/TCP persistence across different IPs**
-  - This was causing the "23 user agents" ban on copy-paste.online
-  - This was causing "phantom reads" where script saw content from previous IP
-  - Now creates fresh `requests.Session()` for each exit node change
-  - Eliminates cookie contamination and TCP socket reuse
+### 🎉 Major Release - Enhanced Reliability & Deduplication
 
-**IP Detection & Verification:**
-- **Fixed IP detection**: Now uses exit node IP directly + external verification
-  - Implements polling system to verify IP change (up to 30s timeout)
-  - Uses `ifconfig.co/ip` to confirm actual external IP
-  - Solves ssavr.com showing wrong IPs (255.x.x.x)
-  - More reliable and consistent IP tracking
-
-**Index Bug:**
-- **Fixed -i index**: Now correctly 1-based (e.g., `-i 139` starts from IP #139, not #140)
-- Fixed enumerate logic to match user expectations
-
-**Text Comparison:**
-- **Fixed content comparison**: Now uses `clean_text()` for all comparisons
-  - Removes soft hyphens, zero-width chars before comparison
-  - Prevents false "content changed" detections
-  - Consistent ownership detection
-
-### ✅ NEW FEATURES
-
-- **Single IP mode** (`-s` flag): Scan only one specific IP and stop
-  - Example: `python3 scanner.py -s 139` scans only exit node #139
-  - Cannot be combined with `-i`, `-l`, or `-b`
-
-- **Configurable Tor ports**: `--socks-port` and `--control-port`
-  - Allows using Tor Browser (ports 9150/9151) instead of system Tor
-  - Example: `python3 scanner.py --socks-port 9150 --control-port 9151`
-
-- **StrictNodes enforcement**: Forces Tor to use exact exit node or fail
-  - Prevents Tor from falling back to alternative nodes
-  - Guarantees IP consistency
-
-- **IPv6 support**: Robust IP extraction supporting both IPv4 and IPv6
-  - Uses `ipaddress` module for validation
-  - Handles dual-stack configurations
-
-- **Debug logging**: New `data/debug.log` file
-  - Logs anomalies (non-200 responses, rate limits, exceptions)
-  - Includes response headers and body snippets
-  - Helps diagnose site-specific issues
-
-- **Rate limit detection**: Automatically detects and logs anti-abuse messages
-  - Warns when copy-paste.online shows user-agent limit
-  - Logs to debug file for analysis
-
-### 🔧 TECHNICAL IMPROVEMENTS
-
-- **Simplified marker disable**: Just create empty file `data/.disable_advanced_features`
-  - No more SHA256 hash requirement
-  - Simple `os.path.exists()` check
-
-- **Improved retry logic**: Better handling of empty reads and failures
-  - Polls with delays between retries
-  - Distinguishes between empty content and connection failures
-
-- **Better error messages**: More descriptive validation errors
-
-- **1-second delay between sites**: Reduces rate limit triggers
-
-### 📝 DOCUMENTATION
-
-- Updated README with:
-  - Tor Browser mode usage
-  - How to disable text normalization
-  - IP verification polling explanation
-  - Debug logging location
-
-### 🐛 BUG FIXES SUMMARY
-
-1. ✅ Session reuse → Fresh session per exit node
-2. ✅ Cookie persistence → Cleared with each new session
-3. ✅ TCP keep-alive → New socket per exit node
-4. ✅ IP mismatches → Polling verification system
-5. ✅ Index off-by-one → Proper 1-based indexing
-6. ✅ Text comparison → Clean text normalization
-7. ✅ Marker disable → Simplified file check
-
-## [2.0.0] - 2024-12-10
-
-### Major Changes
-- **Complete file reorganization**: 
-  - Frequently accessed files (`ssavr_clean.txt`, `copypaste_clean.txt`, `changes.txt`) stay in main directory
-  - All other files (detailed logs, config, state) moved to `data/` directory
-- **Fixed copy-paste.online rate limiting**: Now uses single consistent user agent to avoid "51 user-agents" error
-- **Fixed current state files**: Completely rewritten logic to avoid duplication and corruption
-  - Files now properly track IPs even as exit nodes change
-  - No more repeated "Last updated:" entries
-  - Clean, readable format maintained across updates
+This release focuses on eliminating false positives and preventing duplicate logging.
 
 ### Added
-- **Retry logic for reads**: Automatically retries reading if content is empty or request fails
-  - Prevents false "content disappeared" logs due to temporary loading issues
-  - Retries up to 2 times with 2-second delays
-  - Significantly reduces false positives in change detection
-- Auto-update system (`-u` flag): Check for updates from GitHub while preserving all data
-- Current state snapshots in `data/` directory showing latest content per IP
-- Persistent loop mode that survives restarts
-- Better change detection in loop mode
-- Improved text processing for cross-platform compatibility
+- **Retry Logic with Auto-Recovery**: Automatic 2 retries (3 total attempts) when encountering empty results
+  - 2-second delay between retries to allow connection stabilization
+  - Visual feedback: `(empty, retry 1/2)... (empty, retry 2/2)...`
+  - Applies to both ssavr.com and copy-paste.online
+  - Significantly reduces false empty results from connection issues
+- **Smart Clean File Deduplication**: 
+  - Loads existing clean file content at startup into memory cache
+  - Tracks IP + content combinations to avoid duplicate logging
+  - Only logs new content or same content on different IPs
+  - Shows `💾 Already logged in clean file, skipping` when skipping duplicates
+- **Enhanced Documentation**: Complete English documentation for public GitHub release
+  - Detailed README with all features and examples
+  - Clear explanation of quote requirements in command arguments
+  - Comprehensive troubleshooting guide
 
 ### Changed
-- User agent strategy: ssavr.com uses rotating agents, copy-paste.online uses single agent
-- Password setup instructions clarified (plain text vs hash)
-- All configuration and logs now in `data/` directory for better organization
-- Version bumped to 2.0.0 for major reorganization
+- **All User-Facing Text to English**: Complete internationalization for wider audience
+  - Console output, error messages, help text
+  - Status messages and progress indicators
+  - All documentation and examples
+- **Improved Clean File Logic**: 
+  - `copypaste_clean.txt` now fully functional and working correctly
+  - Both clean files only log truly new content from others
+  - Better filtering of own messages vs external content
+- **Better Empty Detection**: 
+  - Multiple retries before declaring field empty
+  - Reduces false change detections in loop mode
+  - More reliable state tracking
 
 ### Fixed
-- Copy-paste.online "51 user-agents" rate limit error
-- Current state files corruption and duplication
-- Loop mode state tracking across IP changes
-- File organization for better user experience
+- **copypaste_clean.txt Not Generating**: Fixed bug where copy-paste clean file wasn't being created
+- **False Positives in Changes File**: Retry logic prevents spurious empty↔content changes
+- **Duplicate Clean Entries**: Same content from same IP no longer logged multiple times
+- **Connection Timeout False Empties**: Retry system handles temporary network issues
 
-## [1.0.0] - 2024-12-08
+### Technical Improvements
+- Optimized cache loading from existing clean files
+- Better IP extraction from various text formats
+- Enhanced error handling in read operations
+- Improved text normalization and comparison
 
-### Initial Release
-- Scan ssavr.com and copy-paste.online through Tor exit nodes
-- Write messages to empty fields or overwrite own messages
+## [3.0.0] - 2024-12-20
+
+### Added
+- Secure password management with getpass
+- Configuration file for storing settings
+- Update checker with git integration
+- Current state files for real-time IP tracking
+- Advanced text processing features (can be disabled)
+- Statistics tracking for failures
+- Debug logging system
+
+### Changed
+- Reorganized file structure (data/ directory)
+- Improved error messages and user feedback
+- Better IP verification system
+- Enhanced session management
+
+### Fixed
+- IP verification reliability
+- Session cookie handling
+- Rate limiting issues with copy-paste.online
+
+## [2.0.0] - 2024-12-15
+
+### Added
 - Loop mode for continuous monitoring
-- Detailed and clean log files
-- Message history tracking
-- Statistics on failures
-- Random IP order support
-- Selective site targeting
+- Change detection and logging
+- Randomize IP order option
+- Single IP scan mode
+- Message history management
+- Target-specific writing (-t, -ts, -tc options)
+
+### Changed
+- Complete rewrite of scanning logic
+- Improved Tor integration
+- Better exit node selection
+
+## [1.0.0] - 2024-12-10
+
+### Added
+- Initial release
+- Basic scanning through Tor exit nodes
+- Read and write functionality for both sites
+- Simple logging system
+- History tracking
+
+---
+
+## Upgrade Guide
+
+### From 3.x to 4.0
+
+No breaking changes. Simply update and run:
+
+```bash
+git pull origin main
+python3 scanner.py
+```
+
+Your existing:
+- Configuration files will work unchanged
+- Message history will be preserved  
+- Log files will continue to append
+- Clean files will be loaded into cache automatically
+
+New features are automatic - just enjoy improved reliability!
+
+### From 2.x to 3.0
+
+- Password will be requested on first run (saved to config if desired)
+- Files reorganized into `data/` directory - old logs can be moved manually
+- New `data/.tor_scanner_config.json` stores settings
+
+### From 1.x to 2.0
+
+Major rewrite - recommend fresh install:
+
+```bash
+git pull origin main
+rm -rf *.txt *.json  # Backup first if needed
+python3 scanner.py
+```
+
+---
+
+**Note**: Dates are in YYYY-MM-DD format. Version numbers follow [Semantic Versioning](https://semver.org/).

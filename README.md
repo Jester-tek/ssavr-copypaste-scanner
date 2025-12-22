@@ -1,4 +1,43 @@
 everything written here is completely done by AI, even the readme.
+
+Run the script for the first time:
+```bash
+python3 scanner.py
+```
+
+It will ask for your Tor control password. **Important:** Enter the **plain text password** you chose in step 1, **NOT** the hash that starts with `16:...`
+
+You can choose to save it to `data/.tor_scanner_config.json` for future runs.
+
+**⚠️ Security Note:** The config file stores your password in plain text. Keep it secure and don't commit it to version control!
+
+### 4. Using Tor Browser (Alternative)
+
+If you want to use Tor Browser instead of system Tor:
+
+```bash
+# Tor Browser uses different ports: 9150 (SOCKS) and 9151 (Control)
+python3 scanner.py --socks-port 9150 --control-port 9151 [other options]
+
+# Test with curl
+curl --socks5-hostname 127.0.0.1:9150 https://ifconfig.co
+```
+
+**Note:** Tor Browser must be running and have Control Port enabled.
+
+## 🔄 Updating
+
+Check for updates anytime:
+```bash
+python3 scanner.py -u
+```
+
+The script will:
+- Fetch the latest version from GitHub
+- Show you what changed
+- Preserve your configuration and log files
+- Ask for confirmation before updating
+
 ## 🆕 What's New in v3.0
 
 ### Critical Bug Fixes
@@ -102,45 +141,6 @@ brew services restart tor
 ```
 
 ### 3. First Run
-
-Run the script for the first time:
-```bash
-python3 scanner.py
-```
-
-It will ask for your Tor control password. **Important:** Enter the **plain text password** you chose in step 1, **NOT** the hash that starts with `16:...`
-
-You can choose to save it to `data/.tor_scanner_config.json` for future runs.
-
-**⚠️ Security Note:** The config file stores your password in plain text. Keep it secure and don't commit it to version control!
-
-### 4. Using Tor Browser (Alternative)
-
-If you want to use Tor Browser instead of system Tor:
-
-```bash
-# Tor Browser uses different ports: 9150 (SOCKS) and 9151 (Control)
-python3 scanner.py --socks-port 9150 --control-port 9151 [other options]
-
-# Test with curl
-curl --socks5-hostname 127.0.0.1:9150 https://ifconfig.co
-```
-
-**Note:** Tor Browser must be running and have Control Port enabled.
-
-## 🔄 Updating
-
-Check for updates anytime:
-```bash
-python3 scanner.py -u
-```
-
-The script will:
-- Fetch the latest version from GitHub
-- Show you what changed
-- Preserve your configuration and log files
-- Ask for confirmation before updating
-
 ## 🔧 Advanced Configuration
 
 ### Disable Text Normalization
