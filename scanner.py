@@ -208,7 +208,7 @@ class TorClipboardScanner:
             json.dump(self.current_state, f, indent=2, ensure_ascii=False)
 
     def update_current_file(self, site_name, ip_address, content):
-        """Update current state file - FIXED to preserve existing data"""
+        """Update current state file - FIXED to preserve existing data including multi-line content"""
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         filename = CURRENT_SSAVR if "ssavr" in site_name else CURRENT_COPYPASTE
         current_data = {}
@@ -218,17 +218,48 @@ class TorClipboardScanner:
             try:
                 with open(filename, 'r', encoding='utf-8') as f:
                     current_ip = None
+                    reading_content = False
+                    content_lines = []
+
                     for line in f:
                         if line.startswith("[IP:"):
+                            # Save previous IP's content if exists
+                            if current_ip and reading_content:
+                                current_data[current_ip]["content"] = '\n'.join(content_lines).strip()
+                                reading_content = False
+                                content_lines = []
+
+                            # Start new IP
                             current_ip = extract_ip_from_text(line)
                             if current_ip and current_ip not in current_data:
                                 current_data[current_ip] = {"timestamp": "", "content": ""}
+
                         elif current_ip and "Last updated:" in line:
                             ts = line.split("Last updated:")[1].strip()
                             current_data[current_ip]["timestamp"] = ts
-                        elif current_ip and "Content:" in line:
+
+                        elif current_ip and line.strip().startswith("Content:"):
+                            # Start reading content (can be multi-line)
                             cont = line.split("Content:", 1)[1].strip()
-                            current_data[current_ip]["content"] = cont
+                            content_lines = [cont] if cont else []
+                            reading_content = True
+
+                        elif current_ip and reading_content and not line.startswith("-"):
+                            # Continue reading multi-line content
+                            if line.strip():
+                                content_lines.append(line.rstrip())
+
+                        elif line.startswith("-"):
+                            # End of this IP's section
+                            if current_ip and reading_content:
+                                current_data[current_ip]["content"] = '\n'.join(content_lines).strip()
+                                reading_content = False
+                                content_lines = []
+
+                    # Save last IP's content
+                    if current_ip and reading_content:
+                        current_data[current_ip]["content"] = '\n'.join(content_lines).strip()
+
             except Exception as e:
                 self.debug_log(f"Error reading current file {filename}: {e}")
 

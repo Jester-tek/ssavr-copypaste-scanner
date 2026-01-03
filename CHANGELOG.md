@@ -13,6 +13,7 @@ Critical bug fixes and new file loading feature.
   - Previous versions lost all data on each write
   - Now properly preserves existing IP data when updating
   - Correctly parses timestamp and content from existing entries
+  - **NEW: Correctly reads multi-line content** - No longer truncates long messages
   - Files no longer show all IPs with empty content
 - **Loop mode stability improved**
   - Fixed issue where content would be written then immediately removed
