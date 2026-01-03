@@ -1,11 +1,108 @@
 # Changelog
 
-All notable changes to Tor Clipboard Scanner will be documented in this file.
+All notable changes to Tor Clipboard Scanner.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+## [5.0.0] - 2026-01-03
+
+### 🎉 Major Release - Fixed Current Files & Load from File
+
+Critical bug fixes and new file loading feature.
+
+### Fixed
+- **CRITICAL: current_*.txt files now work correctly** 
+  - Previous versions lost all data on each write
+  - Now properly preserves existing IP data when updating
+  - Correctly parses timestamp and content from existing entries
+  - Files no longer show all IPs with empty content
+- **Loop mode stability improved**
+  - Fixed issue where content would be written then immediately removed
+  - Better state management across iterations
+  - More reliable change detection
+
+### Added
+- **Load messages from files**:
+  - `-wf FILE` - Load message from file for both sites
+  - `-tsf FILE` - Load from file for ssavr.com only
+  - `-tcf FILE` - Load from file for copy-paste.online only
+  - Useful for longer messages or automation
+- **Simplified README** - More concise and easier to follow
+- **Better error messages** when file loading fails
+
+### Changed
+- Help text simplified and reorganized
+- Version bumped to 5.0.0 for major fixes
 
 ## [4.0.0] - 2024-12-22
+
+### 🎉 Major Release - Enhanced Reliability & Deduplication
+
+### Added
+- **Retry Logic with Auto-Recovery**: Automatic 2 retries (3 total attempts) when encountering empty results
+- **Smart Clean File Deduplication**: Tracks IP + content combinations to avoid duplicate logging
+- **Enhanced Documentation**: Complete English documentation for public GitHub release
+
+### Changed
+- **All User-Facing Text to English**: Complete internationalization
+- **Improved Clean File Logic**: Both clean files only log truly new content from others
+- **Better Empty Detection**: Multiple retries before declaring field empty
+
+### Fixed
+- **copypaste_clean.txt Not Generating**: Fixed bug where file wasn't being created
+- **False Positives in Changes File**: Retry logic prevents spurious changes
+- **Duplicate Clean Entries**: Same content from same IP no longer logged multiple times
+
+## [3.0.0] - 2024-12-20
+
+### Added
+- Secure password management with getpass
+- Configuration file for settings
+- Update checker with git integration
+- Current state files for real-time IP tracking
+- Statistics tracking for failures
+
+## [2.0.0] - 2024-12-15
+
+### Added
+- Loop mode for continuous monitoring
+- Change detection and logging
+- Randomize IP order option
+- Single IP scan mode
+- Target-specific writing (-t, -ts, -tc options)
+
+## [1.0.0] - 2024-12-10
+
+### Added
+- Initial release
+- Basic scanning through Tor
+- Read/write for both sites
+
+---
+
+## Upgrade Guide
+
+### From 4.x to 5.0
+
+**IMPORTANT**: Delete old current_*.txt files to start fresh with fixed format.
+
+```bash
+rm data/current_ssavr.txt data/current_copypaste.txt
+git pull origin main
+python3 scanner.py
+```
+
+Your configuration and logs are preserved.
+
+### From 3.x to 4.0
+
+No breaking changes - simply update:
+```bash
+git pull origin main
+python3 scanner.py
+```
+
+---
+
+**Note**: Version numbers follow [Semantic Versioning](https://semver.org/).
 
 ### 🎉 Major Release - Enhanced Reliability & Deduplication
 

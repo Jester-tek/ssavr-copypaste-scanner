@@ -22,7 +22,7 @@ from stem import Signal
 from stem.control import Controller
 from bs4 import BeautifulSoup
 
-VERSION = "4.0.0"
+VERSION = "5.0.0"
 REPO_URL = "https://github.com/Jester-tek/ssavr-copypaste-scanner"
 
 TOR_SOCKS_PORT = 9050
@@ -75,6 +75,16 @@ def extract_ip_from_text(text):
         except ValueError:
             continue
     return None
+
+
+def load_message_from_file(filepath):
+    """Load message content from file"""
+    try:
+        with open(filepath, 'r', encoding='utf-8') as f:
+            return f.read().strip()
+    except Exception as e:
+        print(f"✗ Error reading file {filepath}: {e}")
+        sys.exit(1)
 
 
 class TorClipboardScanner:
@@ -198,20 +208,37 @@ class TorClipboardScanner:
             json.dump(self.current_state, f, indent=2, ensure_ascii=False)
 
     def update_current_file(self, site_name, ip_address, content):
+        """Update current state file - FIXED to preserve existing data"""
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         filename = CURRENT_SSAVR if "ssavr" in site_name else CURRENT_COPYPASTE
         current_data = {}
+
+        # Parse existing file PROPERLY to preserve all data
         if Path(filename).exists():
             try:
                 with open(filename, 'r', encoding='utf-8') as f:
+                    current_ip = None
                     for line in f:
                         if line.startswith("[IP:"):
-                            extracted_ip = extract_ip_from_text(line)
-                            if extracted_ip:
-                                current_data[extracted_ip] = {"timestamp": "", "content": ""}
-            except:
-                pass
-        current_data[ip_address] = {"timestamp": timestamp, "content": content if content else "(empty)"}
+                            current_ip = extract_ip_from_text(line)
+                            if current_ip and current_ip not in current_data:
+                                current_data[current_ip] = {"timestamp": "", "content": ""}
+                        elif current_ip and "Last updated:" in line:
+                            ts = line.split("Last updated:")[1].strip()
+                            current_data[current_ip]["timestamp"] = ts
+                        elif current_ip and "Content:" in line:
+                            cont = line.split("Content:", 1)[1].strip()
+                            current_data[current_ip]["content"] = cont
+            except Exception as e:
+                self.debug_log(f"Error reading current file {filename}: {e}")
+
+        # Update ONLY the current IP
+        current_data[ip_address] = {
+            "timestamp": timestamp,
+            "content": content if content else "(empty)"
+        }
+
+        # Rewrite file with ALL data preserved
         with open(filename, 'w', encoding='utf-8') as f:
             f.write(f"# Current state of {site_name}\n")
             f.write(f"# Last updated: {timestamp}\n")
@@ -248,7 +275,7 @@ class TorClipboardScanner:
         print("\nOn Linux/Mac, run these commands:")
         print("  1. Generate hashed password:")
         print("     tor --hash-password YOUR_CHOSEN_PASSWORD")
-        print("\n  2. Copy the generated hash (starts with '16:...')")
+        print("\n  2. Copy the hash (starts with '16:...')")
         print("\n  3. Edit /etc/tor/torrc and add these lines:")
         print(f"     ControlPort {self.control_port}")
         print("     HashedControlPassword 16:YOUR_COPIED_HASH")
@@ -852,83 +879,64 @@ class TorClipboardScanner:
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Tor Clipboard Scanner - Scan ssavr.com and copy-paste.online through Tor exit nodes',
+        description='Tor Clipboard Scanner v5.0 - Scan clipboard websites through Tor',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-DESCRIPTION:
-  This tool scans clipboard sharing websites (ssavr.com and copy-paste.online)
-  through different Tor exit nodes to read and write messages anonymously.
-
-FIRST TIME SETUP (Linux/Mac):
-  1. Install Tor: sudo apt install tor (Debian/Ubuntu) or brew install tor (Mac)
-  2. Generate password hash: tor --hash-password YOUR_CHOSEN_PASSWORD
-  3. Copy the hash (starts with '16:...')
-  4. Edit /etc/tor/torrc and add:
-     ControlPort 9051
-     HashedControlPassword 16:YOUR_COPIED_HASH
-  5. Restart Tor: sudo systemctl restart tor
-  6. Run this script - enter YOUR_CHOSEN_PASSWORD (plain text, not hash)
-
-QUOTES IN ARGUMENTS:
-  Quotes are REQUIRED when your message contains spaces.
-
-  Examples:
-    ✅ python3 scanner.py -w "Hello world"     (spaces = quotes required)
-    ✅ python3 scanner.py -w Hello             (no spaces = quotes optional)
-    ✅ python3 scanner.py -w 'Hello world'     (single quotes work too)
-    ❌ python3 scanner.py -w Hello world       (ERROR: only reads "Hello")
-
-TOR BROWSER MODE:
-  To use Tor Browser instead of system Tor:
-  %(prog)s --socks-port 9150 --control-port 9151 [other options]
-
-FILE ORGANIZATION:
-  Main directory:
-    - ssavr_clean.txt, copypaste_clean.txt, changes.txt
-  data/ directory:
-    - Detailed logs, config, state files
-    - Create data/.disable_advanced_features (empty file) to disable text processing
-
 EXAMPLES:
-  %(prog)s -u                           # Check for updates
   %(prog)s                              # Read-only scan
-  %(prog)s -s 139                       # Scan ONLY IP #139
-  %(prog)s -i 100                       # Start from IP #100
-  %(prog)s -w "Hello" -a                # Write to all IPs (overwrite everything)
-  %(prog)s -l                           # Loop mode: monitor changes
-  %(prog)s -t SS -w "Only SS"           # Write only to ssavr.com
-  %(prog)s -t CP -w "Only CP"           # Write only to copy-paste.online
-  %(prog)s -ts "Hi SS" -tc "Hi CP"      # Different messages on two sites
-  %(prog)s --socks-port 9150 --control-port 9151 -s 1  # Use Tor Browser
+  %(prog)s -w "Hello"                   # Write to both sites
+  %(prog)s -wf message.txt              # Write from file to both sites
+  %(prog)s -ts "Hi SS" -tc "Hi CP"      # Different messages per site
+  %(prog)s -tsf msg1.txt -tcf msg2.txt  # Different messages from files
+  %(prog)s -s 139                       # Scan only IP #139
+  %(prog)s -l                           # Loop mode (monitor changes)
+  %(prog)s -w "Test" -a                 # Overwrite everything
 
-DEPENDENCIES:
-  pip install requests[socks] stem beautifulsoup4
+SETUP:
+  1. Install: sudo apt install tor && pip install requests[socks] stem beautifulsoup4
+  2. Generate hash: tor --hash-password YOUR_PASSWORD
+  3. Edit /etc/tor/torrc: ControlPort 9051 + HashedControlPassword 16:HASH
+  4. Restart: sudo systemctl restart tor
+  5. Run script and enter YOUR_PASSWORD (plain text)
 
-MORE INFO:
-  GitHub: https://github.com/Jester-tek/ssavr-copypaste-scanner
+MORE INFO: https://github.com/Jester-tek/ssavr-copypaste-scanner
         """
     )
-    parser.add_argument('-u', '--update', action='store_true', help='Check for updates from GitHub')
-    parser.add_argument('--socks-port', type=int, help='Tor SOCKS port (default: 9050, Tor Browser: 9150)')
-    parser.add_argument('--control-port', type=int, help='Tor Control port (default: 9051, Tor Browser: 9151)')
+    parser.add_argument('-u', '--update', action='store_true', help='Check for updates')
+    parser.add_argument('--socks-port', type=int, help='Tor SOCKS port (default: 9050)')
+    parser.add_argument('--control-port', type=int, help='Tor control port (default: 9051)')
     parser.add_argument('-w', '--write', help='Write message to both sites')
-    parser.add_argument('-t', '--target', choices=['SS', 'CP'], help='Target: SS (ssavr.com) or CP (copy-paste.online)')
+    parser.add_argument('-wf', '--write-file', help='Write message from file to both sites')
+    parser.add_argument('-t', '--target', choices=['SS', 'CP'], help='Target: SS (ssavr) or CP (copypaste)')
     parser.add_argument('-ts', '--target-ssavr', help='Write message only to ssavr.com')
+    parser.add_argument('-tsf', '--target-ssavr-file', help='Write from file only to ssavr.com')
     parser.add_argument('-tc', '--target-copypaste', help='Write message only to copy-paste.online')
-    parser.add_argument('-o', '--overwrite', action='store_true', help='Also overwrite your own previous messages')
+    parser.add_argument('-tcf', '--target-copypaste-file', help='Write from file only to copy-paste.online')
+    parser.add_argument('-o', '--overwrite', action='store_true', help='Overwrite own messages')
     parser.add_argument('-a', '--all', action='store_true', help='Overwrite ANY content (⚠️ dangerous!)')
-    parser.add_argument('-i', '--index', type=int, help='Start from IP number (1-based, e.g., -i 100 starts from IP #100)')
-    parser.add_argument('-s', '--single', type=int, help='Scan ONLY the specified IP number and stop (1-based, e.g., -s 139)')
-    parser.add_argument('-l', '--loop', action='store_true', help='Loop mode: continuously monitor for changes')
-    parser.add_argument('-b', '--randomize', action='store_true', help='Randomize exit node order')
+    parser.add_argument('-i', '--index', type=int, help='Start from IP number (1-based)')
+    parser.add_argument('-s', '--single', type=int, help='Scan ONLY one IP (1-based)')
+    parser.add_argument('-l', '--loop', action='store_true', help='Loop mode (monitor changes)')
+    parser.add_argument('-b', '--randomize', action='store_true', help='Randomize IP order')
     parser.add_argument('-x', '--add-history', help='Add message to history')
-    parser.add_argument('-k', '--show-history', action='store_true', help='Show all messages in history')
+    parser.add_argument('-k', '--show-history', action='store_true', help='Show message history')
     parser.add_argument('-r', '--remove-history', help='Remove message from history')
+
     args = parser.parse_args()
+
+    # Load messages from files if specified
+    if args.write_file:
+        args.write = load_message_from_file(args.write_file)
+    if args.target_ssavr_file:
+        args.target_ssavr = load_message_from_file(args.target_ssavr_file)
+    if args.target_copypaste_file:
+        args.target_copypaste = load_message_from_file(args.target_copypaste_file)
+
     if args.update:
         scanner = TorClipboardScanner(args)
         scanner.check_for_updates()
         return
+
     scanner = TorClipboardScanner(args)
     try:
         scanner.run()
