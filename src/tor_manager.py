@@ -137,7 +137,7 @@ class TorManager:
             utils.debug_log(f"Error fetching exit nodes: {e}")
             return {}
 
-    def verify_ip_via_external(self, expected_ip=None, timeout=None):
+    def verify_ip_via_external(self, expected_ip=None, timeout=None, verbose=False):
         timeout = timeout or config.TOR_CONNECT_TIMEOUT
         if not self.session:
             self.create_fresh_session()
@@ -153,7 +153,8 @@ class TorManager:
         
         attempt = 0
         start_time = time.time()
-        print(f"   🔄 Verifying IP {expected_ip}...", end="", flush=True)
+        if verbose:
+            print(f"   🔄 Verifying IP {expected_ip}...", end="", flush=True)
         
         while (time.time() - start_time) < timeout:
             # Shuffle providers to load balance / avoid patterns
@@ -171,25 +172,25 @@ class TorManager:
                         if expected_ip:
                             if detected_ip == expected_ip:
                                 elapsed = time.time() - start_time
-                                print(f" ✓ ({elapsed:.1f}s, {attempt} attempts)")
+                                if verbose: print(f" ✓ ({elapsed:.1f}s, {attempt} attempts)")
                                 return detected_ip
                             else:
                                 # IP mismatch, maybe Tor hasn't switched yet
-                                print(".", end="", flush=True)
+                                if verbose: print(".", end="", flush=True)
                                 continue
                         else:
-                            print(f" ✓")
+                            if verbose: print(f" ✓")
                             return detected_ip
                 except Exception as e:
-                    print("x", end="", flush=True)
+                    if verbose: print("x", end="", flush=True)
                     pass
             
             time.sleep(1) # Wait a bit before retrying the loop
         
-        print(f" ✗ (timeout after {timeout}s)")
+        if verbose: print(f" ✗ (timeout after {timeout}s)")
         return None
 
-    def change_exit_node(self, fingerprint, expected_ip):
+    def change_exit_node(self, fingerprint, expected_ip, verbose=False):
         try:
             self.controller.set_conf("ExitNodes", f"${fingerprint}")
             self.controller.set_conf("StrictNodes", "1")
@@ -197,7 +198,7 @@ class TorManager:
             
             self.create_fresh_session()
             
-            verified_ip = self.verify_ip_via_external(expected_ip, timeout=config.TOR_CONNECT_TIMEOUT)
+            verified_ip = self.verify_ip_via_external(expected_ip, timeout=config.TOR_CONNECT_TIMEOUT, verbose=verbose)
             if verified_ip:
                 if verified_ip != expected_ip:
                     utils.debug_log(f"IP mismatch: expected {expected_ip}, got {verified_ip}")

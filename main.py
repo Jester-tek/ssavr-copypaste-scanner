@@ -204,11 +204,13 @@ class ScannerApp:
         
         if current_content == "":
             update_status("✅ Found: [Empty]", "✅")
+            if display_manager: display_manager.log(f"   [{site_name}] Found: [Empty]")
         else:
             # Show a longer preview as requested
             preview = clean_content[:60] + "..." if len(clean_content) > 60 else clean_content
-            ownership_str = " (MINE)" if is_mine else ""
+            ownership_str = " (MINE)" if is_mine else " [NEW]"
             update_status(f"✅ Found{ownership_str}: '{preview}'", "✅")
+            if display_manager: display_manager.log(f"   [{site_name}] Found{ownership_str}: '{preview}'")
 
         # Log detailed
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -272,10 +274,15 @@ class ScannerApp:
             if should_write:
                 # Log what we are overwriting if it's not empty and not mine 
                 # (Active mode implies total overwrite could nuke random stuff)
-                if current_content and not is_mine and display_manager:
-                     # Log the FULL content being removed
-                     log_msg = f"[bold red]🗑  [{site_name}] Removing content:[/bold red] {clean_content}"
-                     display_manager.log(log_msg)
+                if display_manager:
+                     if current_content == "":
+                         display_manager.log(f"   [{site_name}] Overwriting [Empty] with new message")
+                     elif is_mine:
+                         display_manager.log(f"   [{site_name}] Overwriting [Own Message]")
+                     else:
+                         # Log the FULL content being removed
+                         log_msg = f"[bold red]🗑  [{site_name}] Removing content:[/bold red] {clean_content}"
+                         display_manager.log(log_msg)
 
                 update_status(f"Writing ({write_type})...", "✍️")
                 if client.write(write_content):
@@ -367,7 +374,11 @@ class ScannerApp:
                     # Start Display for this IP
                     display.start_ip(i, total, ip_address, loop_iteration if self.args.loop else None)
                     
-                    if self.tor.change_exit_node(fingerprint, ip_address):
+                    verified = False
+                    with display.console.status(f"   🔄 Verifying IP {ip_address}...", spinner="dots"):
+                        verified = self.tor.change_exit_node(fingerprint, ip_address, verbose=False)
+
+                    if verified:
                         # RESET sessions to ensure independence and fresh cookies for new IP
                         self.clients["ssavr"].reset_session()
                         self.clients["copypaste"].reset_session()
