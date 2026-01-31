@@ -2,16 +2,24 @@ everything written here is completely done by AI, even the readme.
 
 # 🌐 Tor Clipboard Scanner
 
-**v5.0.0** - Anonymous clipboard monitoring through Tor exit nodes
+**v5.5.0** - Anonymous clipboard monitoring through Tor exit nodes with real-time parallel scanning
 
-Scan ssavr.com and copy-paste.online through different Tor exit nodes for maximum anonymity.
+Scan ssavr.com and copy-paste.online through Tor exit nodes for maximum anonymity.
+
+## ✨ Features
+
+- **Parallel Scanning**: Both sites scanned simultaneously per IP
+- **Real-Time UI**: Rich terminal dashboard with live status updates
+- **IP Provider Rotation**: 5 fallback services for reliable IP verification
+- **Graceful Shutdown**: Clean exit with statistics on Ctrl+C
+- **Loop Mode**: Continuous monitoring with change detection
 
 ## 🚀 Quick Start
 
 ```bash
-# Install
+# Install dependencies
 sudo apt install tor
-pip install requests[socks] stem beautifulsoup4
+pip install -r requirements.txt
 
 # Setup Tor
 tor --hash-password YOUR_PASSWORD
@@ -21,29 +29,30 @@ tor --hash-password YOUR_PASSWORD
 sudo systemctl restart tor
 
 # Run
-python3 scanner.py
+python3 main.py
 ```
 
 ## 📖 Usage
 
 ```bash
 # Basic
-python3 scanner.py                    # Read-only scan
-python3 scanner.py -s 139             # Scan only IP #139
-python3 scanner.py -l                 # Loop mode (monitor changes)
+python3 main.py                         # Read-only scan
+python3 main.py -s 139                  # Scan only IP #139
+python3 main.py -l                      # Loop mode (monitor changes)
 
 # Writing
-python3 scanner.py -w "Hello"         # Write to both sites
-python3 scanner.py -wf msg.txt        # Write from file
-python3 scanner.py -ts "Hi SS" -tc "Hi CP"  # Different per site
-python3 scanner.py -tsf s.txt -tcf c.txt    # From files
+python3 main.py -w "Hello"              # Write to both sites
+python3 main.py -wf msg.txt             # Write from file
+python3 main.py -ts "Hi SS" -tc "Hi CP" # Different per site
+python3 main.py -tsf s.txt -tcf c.txt   # From files
 
 # Advanced
-python3 scanner.py -w "Test" -o       # Overwrite own messages
-python3 scanner.py -w "Test" -a       # Overwrite EVERYTHING (⚠️)
-python3 scanner.py -i 100             # Start from IP #100
-python3 scanner.py -b                 # Randomize order
-python3 scanner.py -t SS -w "Only SS" # Target specific site
+python3 main.py -w "Test" -o            # Overwrite own messages
+python3 main.py -w "Test" -a            # Overwrite EVERYTHING (⚠️)
+python3 main.py -i 100                  # Start from IP #100
+python3 main.py -b                      # Randomize order
+python3 main.py -t SS -w "Only SS"      # Target specific site
+python3 main.py -u                      # Check for updates
 ```
 
 ## 📁 Files
@@ -85,15 +94,15 @@ python3 scanner.py -t SS -w "Only SS" # Target specific site
 
 **Quotes**: Required when message contains spaces
 ```bash
-✅ python3 scanner.py -w "Hello world"
-✅ python3 scanner.py -w Hello
-❌ python3 scanner.py -w Hello world
+✅ python3 main.py -w "Hello world"
+✅ python3 main.py -w Hello
+❌ python3 main.py -w Hello world
 ```
 
 **From File**: Use `-wf`, `-tsf`, `-tcf` for longer messages
 ```bash
 echo "Long message here" > msg.txt
-python3 scanner.py -wf msg.txt
+python3 main.py -wf msg.txt
 ```
 
 **Disable Advanced Features**: Create `data/.disable_advanced_features` (empty file)
@@ -117,4 +126,4 @@ See [CHANGELOG.md](CHANGELOG.md)
 
 ---
 
-**v5.0.0** | MIT License
+**v5.5.0** | MIT License
