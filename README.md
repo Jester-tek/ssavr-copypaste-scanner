@@ -2,7 +2,7 @@ everything written here is completely done by AI, even the readme.
 
 # 🌐 Tor Clipboard Scanner
 
-**v5.5.0** - Anonymous clipboard monitoring through Tor exit nodes with real-time parallel scanning
+**v5.6.0** - Anonymous clipboard monitoring through Tor exit nodes with parallel scanning
 
 Scan ssavr.com and copy-paste.online through Tor exit nodes for maximum anonymity.
 
@@ -126,4 +126,4 @@ See [CHANGELOG.md](CHANGELOG.md)
 
 ---
 
-**v5.5.0** | MIT License
+**v5.6.0** | MIT License

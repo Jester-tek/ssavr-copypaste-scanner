@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 
 # Version and Info
-VERSION = "5.5.0"
+VERSION = "5.6.0"
 REPO_URL = "https://github.com/Jester-tek/ssavr-copypaste-scanner"
 
 # Directory Structure

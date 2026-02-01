@@ -235,23 +235,26 @@ class ScannerApp:
                 )
                 self.storage.clean_cache[site_key][ip_address] = clean_content
 
-        # Loop mode logic (Change detection)
-        if self.args.loop:
-            state_key = f"{ip_address}_{site_name}"
-            prev_content = self.storage.current_state.get(state_key)
-            if prev_content is not None and utils.clean_text(prev_content) != clean_content:
-                change_log = f"[{timestamp}] 🔄 CHANGE detected on {site_name}\n"
-                change_log += f"  IP: {ip_address}\n"
-                change_log += f"  BEFORE: {utils.clean_text(prev_content)}\n"
-                change_log += f"  AFTER: {clean_content}\n"
-                change_log += "-" * 80 + "\n"
-                self.storage.log_to_file(config.CHANGES_FILE, change_log)
-                update_status("⚠️ Change detected!", "⚠️")
-                time.sleep(2) # Show the alert briefly
-            
-            self.storage.current_state[state_key] = current_content
-            self.storage.save_current_state()
-            return
+        # Change detection (Global)
+        state_key = f"{ip_address}_{site_name}"
+        prev_content = self.storage.current_state.get(state_key)
+        if prev_content is not None and utils.clean_text(prev_content) != clean_content:
+            change_log = f"[{timestamp}] 🔄 CHANGE detected on {site_name}\n"
+            change_log += f"  IP: {ip_address}\n"
+            change_log += f"  BEFORE: {utils.clean_text(prev_content)}\n"
+            change_log += f"  AFTER: {clean_content}\n"
+            change_log += "-" * 80 + "\n"
+            self.storage.log_to_file(config.CHANGES_FILE, change_log)
+            # Only show alert if loop mode or explicitly requested, otherwise it might be noisy? 
+            # Actually user asked for it to update "always". 
+            # Let's show the alert but maybe shorter or just log it. 
+            # Keeping existing behavior but global.
+            update_status("⚠️ Change detected!", "⚠️")
+            time.sleep(2) # Show the alert briefly
+        
+        self.storage.current_state[state_key] = current_content
+        self.storage.save_current_state()
+            # return  <-- Removed to allow fall-through to Write Logic
 
         # Write Logic
         if write_content:
@@ -480,8 +483,7 @@ def main():
     if args.single and args.index: parser.error("-s/--single cannot be used with -i/--index")
     if args.single and args.loop: parser.error("-s/--single cannot be used with -l/--loop")
     if args.single and args.randomize: parser.error("-s/--single cannot be used with -b/--randomize")
-    if args.loop and (args.write or args.target_ssavr or args.target_copypaste or args.write_file): 
-        parser.error("-l/--loop cannot be used with write arguments")
+    # Loop + Write constraint removed
     if args.all and args.overwrite: parser.error("-a/--all cannot be used with -o/--overwrite")
     
     # Load files

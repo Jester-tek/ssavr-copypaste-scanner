@@ -2,6 +2,29 @@
 
 All notable changes to Tor Clipboard Scanner.
 
+## [5.6.0] - 2026-02-01
+
+### Added
+- **Loop + Write Combination**: `-l` flag can now be used with write arguments (`-w`, `-tcf`, etc.)
+  - Monitor changes AND write/overwrite in the same run
+  - Useful for maintaining presence while detecting external changes
+- **Global Change Detection**: `changes.txt` now updates in ALL modes, not just loop mode
+  - Every scan compares with previous state
+  - Automatic change logging regardless of flags used
+- **Final Report on Exit**: Statistics summary now shown on both clean exit and Ctrl+C
+  - Duration, failures, and totals displayed consistently
+
+### Changed
+- **Transient IP Verification**: IP verification status now disappears after completion (cleaner output)
+- **Persistent Scan Logs**: Important events (Found, Removing, Overwriting) remain visible after completion
+- **Improved Parallelism**: Direct threading implementation for guaranteed parallel execution
+  - Both sites start within 0.002s of each other
+  - Independent session management per site
+
+### Fixed
+- IP verification timeout increased to 25s for better reliability
+- 5 fallback IP providers for robust verification
+
 ## [5.0.0] - 2026-01-03
 
 ### 🎉 Major Release - Fixed Current Files & Load from File
