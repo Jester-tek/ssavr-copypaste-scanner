@@ -46,9 +46,9 @@ class ScannerApp:
         
         signal.signal(signal.SIGINT, self.handle_interrupt)
 
-    def handle_interrupt(self, sig, frame):
+    def print_report(self):
         print("\n\n" + "="*80)
-        print("🛑 USER INTERRUPT (Stopping gracefully...)")
+        print("📊 FINAL SCAN REPORT")
         print("="*80)
         
         # Calculate duration
@@ -72,9 +72,11 @@ class ScannerApp:
         print(f"\n🔴 Total failures: {total_fails}")
         print("="*80)
         print("\n✓ Script terminated")
-        
+
+    def handle_interrupt(self, sig, frame):
+        print("\n🛑 USER INTERRUPT (Stopping gracefully...)")
+        self.print_report()
         self.running = False
-        # sys.exit(0)  <-- REMOVED to allow graceful thread join
 
     def print_stats(self):
         print("\n" + "="*80)
@@ -419,6 +421,10 @@ class ScannerApp:
                 
         except KeyboardInterrupt:
             self.handle_interrupt(None, None)
+        finally:
+            # Ensure report is printed on clean exit too (if not already handled by interrupt)
+            if self.running: 
+                self.print_report()
 
 
 # Helper to load file content
