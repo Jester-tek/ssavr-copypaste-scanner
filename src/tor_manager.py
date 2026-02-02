@@ -210,3 +210,29 @@ class TorManager:
             # print(f"✗ Error changing exit node: {e}") # Reduce verbosity in main output
             utils.debug_log(f"Change exit node error: {e}")
             return False
+
+    def reset_circuit(self):
+        """Reset Tor circuit when stuck. Called after consecutive failures."""
+        try:
+            print("   🔄 Resetting Tor circuit (was stuck)...", end="", flush=True)
+            # Clear ExitNodes constraint
+            self.controller.reset_conf("ExitNodes")
+            self.controller.reset_conf("StrictNodes")
+            
+            # Send NEWNYM twice with delay
+            self.controller.signal(Signal.NEWNYM)
+            time.sleep(3)
+            self.controller.signal(Signal.NEWNYM)
+            
+            # Wait for Tor to stabilize
+            time.sleep(10)
+            
+            # Create fresh session
+            self.create_fresh_session()
+            
+            print(" ✓ (reset complete)")
+            return True
+        except Exception as e:
+            print(f" ✗ (reset failed: {e})")
+            utils.debug_log(f"Reset circuit error: {e}")
+            return False

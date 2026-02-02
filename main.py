@@ -373,6 +373,8 @@ class ScannerApp:
                 else:
                     items_to_scan = enumerate(exit_nodes_items[start_index:], start=start_index + 1)
 
+                consecutive_failures = 0  # Track consecutive IP verification failures
+                
                 for i, (fingerprint, ip_address) in items_to_scan:
                     if not self.running: break
                     
@@ -384,6 +386,7 @@ class ScannerApp:
                         verified = self.tor.change_exit_node(fingerprint, ip_address, verbose=False)
 
                     if verified:
+                        consecutive_failures = 0  # Reset counter on success
                         # RESET sessions to ensure independence and fresh cookies for new IP
                         self.clients["ssavr"].reset_session()
                         self.clients["copypaste"].reset_session()
@@ -410,7 +413,13 @@ class ScannerApp:
                         
                         # No longer printing text output buffer, relying on Rich Table.
                     else:
-                        print(f"❌ Failed to switch/verify IP. Skipping...")
+                        consecutive_failures += 1
+                        print(f"❌ Failed to switch/verify IP. Skipping... ({consecutive_failures}/5)")
+                        
+                        # After 5 consecutive failures, reset Tor circuit
+                        if consecutive_failures >= 5:
+                            self.tor.reset_circuit()
+                            consecutive_failures = 0  # Reset counter after circuit reset
                     
                     if self.args.single: break
 
