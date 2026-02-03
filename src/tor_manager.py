@@ -3,17 +3,120 @@ import getpass
 import requests
 import subprocess
 import socket
+import os
+import atexit
 from stem import Signal
 from stem.control import Controller
 from . import config, utils
 
 class TorManager:
     def __init__(self, socks_port=None, control_port=None):
-        self.socks_port = socks_port or config.DEFAULT_SOCKS_PORT
-        self.control_port = control_port or config.DEFAULT_CONTROL_PORT
+        self.socks_port = socks_port or config.SCANNER_SOCKS_PORT
+        self.control_port = control_port or config.SCANNER_CONTROL_PORT
         self.controller = None
         self.session = None
         self.tor_password = None
+        self.tor_process = None  # Our dedicated Tor daemon
+        self.using_dedicated_tor = False
+        
+        # Register cleanup on exit
+        atexit.register(self.shutdown_scanner_tor)
+
+    def create_scanner_torrc(self):
+        """Create dedicated torrc for scanner - doesn't touch system Tor."""
+        config.SCANNER_TOR_DIR.mkdir(parents=True, exist_ok=True)
+        config.SCANNER_TOR_DATA.mkdir(parents=True, exist_ok=True)
+        
+        torrc_content = f"""# Scanner-specific Tor instance - DOES NOT AFFECT SYSTEM TOR
+SocksPort {config.SCANNER_SOCKS_PORT}
+ControlPort {config.SCANNER_CONTROL_PORT}
+DataDirectory {config.SCANNER_TOR_DATA}
+CookieAuthentication 1
+Log notice file {config.SCANNER_TOR_DIR / 'tor.log'}
+
+# Performance optimizations for scanning
+CircuitBuildTimeout 30
+LearnCircuitBuildTimeout 0
+MaxCircuitDirtiness 600
+NewCircuitPeriod 15
+"""
+        with open(config.SCANNER_TORRC, 'w') as f:
+            f.write(torrc_content)
+        
+        utils.debug_log(f"Created scanner torrc at {config.SCANNER_TORRC}")
+        return True
+
+    def start_scanner_tor(self):
+        """Start dedicated Tor instance for scanner only."""
+        print("🔄 Starting dedicated Tor instance for scanner...")
+        
+        # Check if already running on scanner port
+        if self._check_port_open(config.SCANNER_SOCKS_PORT):
+            print("   ⚠️  Scanner Tor port already in use, will try to connect")
+            return True
+        
+        # Create torrc
+        self.create_scanner_torrc()
+        
+        try:
+            self.tor_process = subprocess.Popen(
+                ['tor', '-f', str(config.SCANNER_TORRC)],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE
+            )
+            
+            # Wait for Tor to bootstrap
+            print("   ⏳ Waiting for Tor to bootstrap (this may take 30-60s)...")
+            for i in range(60):
+                time.sleep(1)
+                if self._check_port_open(config.SCANNER_SOCKS_PORT):
+                    print(f"   ✓ Scanner Tor started (port {config.SCANNER_SOCKS_PORT})")
+                    self.using_dedicated_tor = True
+                    return True
+                if self.tor_process.poll() is not None:
+                    # Process exited
+                    stderr = self.tor_process.stderr.read().decode()
+                    print(f"   ✗ Tor failed to start: {stderr[:200]}")
+                    return False
+            
+            print("   ✗ Tor bootstrap timeout")
+            return False
+            
+        except FileNotFoundError:
+            print("   ✗ Tor binary not found. Install with: sudo apt install tor")
+            return False
+        except Exception as e:
+            print(f"   ✗ Error starting Tor: {e}")
+            return False
+
+    def shutdown_scanner_tor(self):
+        """Shutdown dedicated Tor instance."""
+        if self.tor_process and self.tor_process.poll() is None:
+            print("🔄 Shutting down scanner's Tor instance...")
+            self.tor_process.terminate()
+            try:
+                self.tor_process.wait(timeout=10)
+                print("   ✓ Scanner Tor stopped")
+            except subprocess.TimeoutExpired:
+                self.tor_process.kill()
+                print("   ⚠️ Scanner Tor force-killed")
+        
+        # Cleanup controller
+        if self.controller:
+            try:
+                self.controller.close()
+            except:
+                pass
+
+    def _check_port_open(self, port):
+        """Check if a port is open."""
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            sock.connect(('127.0.0.1', port))
+            sock.close()
+            return True
+        except:
+            return False
 
     def check_tor_running(self):
         try:
@@ -81,23 +184,34 @@ class TorManager:
         return password
 
     def connect(self):
-        if not self.check_tor_running():
-            print("⚠ Tor is not active")
-            if not self.start_tor():
-                return False
-                
-        self.tor_password = self.get_tor_password()
+        """Connect to scanner's dedicated Tor instance."""
+        # Start dedicated scanner Tor (doesn't affect system Tor)
+        if not self.start_scanner_tor():
+            print("✗ Failed to start scanner's Tor instance")
+            return False
+        
+        # Wait a bit for control port to be ready
+        time.sleep(2)
+        
         try:
             self.controller = Controller.from_port(port=self.control_port)
-            self.controller.authenticate(password=self.tor_password)
-            print(f"✓ Connected to Tor Control Port ({self.control_port})")
+            
+            # Use cookie authentication (no password needed for our own instance)
+            cookie_path = config.SCANNER_TOR_DATA / "control_auth_cookie"
+            if cookie_path.exists():
+                with open(cookie_path, 'rb') as f:
+                    cookie = f.read()
+                self.controller.authenticate(cookie)
+            else:
+                # Fallback to password if cookie not available
+                self.tor_password = self.get_tor_password()
+                self.controller.authenticate(password=self.tor_password)
+            
+            print(f"✓ Connected to Scanner Tor Control Port ({self.control_port})")
             return True
         except Exception as e:
-            print(f"✗ Error connecting to Tor: {e}")
-            print("\nMake sure:")
-            print("  1. Tor is running: sudo systemctl start tor")
-            print(f"  2. Control port {self.control_port} is enabled in /etc/tor/torrc")
-            print("  3. Your password is correct (use the PLAIN TEXT password)")
+            print(f"✗ Error connecting to Scanner Tor: {e}")
+            utils.debug_log(f"Tor connection error: {e}")
             return False
 
     def get_new_session(self):
@@ -194,7 +308,8 @@ class TorManager:
         try:
             self.controller.set_conf("ExitNodes", f"${fingerprint}")
             self.controller.set_conf("StrictNodes", "1")
-            self.controller.signal(Signal.NEWNYM)
+            # NEWNYM removed - setting ExitNodes is sufficient, new circuits will use it
+            # This avoids Tor's 10-second rate limit on NEWNYM signals
             
             self.create_fresh_session()
             
@@ -236,3 +351,13 @@ class TorManager:
             print(f" ✗ (reset failed: {e})")
             utils.debug_log(f"Reset circuit error: {e}")
             return False
+
+    def cleanup(self):
+        """Reset Tor config to defaults. Call on script exit to not affect other apps."""
+        try:
+            if self.controller and self.controller.is_alive():
+                self.controller.reset_conf("ExitNodes")
+                self.controller.reset_conf("StrictNodes")
+                utils.debug_log("Tor config cleaned up (ExitNodes/StrictNodes reset)")
+        except Exception as e:
+            utils.debug_log(f"Cleanup error: {e}")

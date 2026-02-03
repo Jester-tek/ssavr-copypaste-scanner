@@ -434,6 +434,7 @@ class ScannerApp:
         except KeyboardInterrupt:
             self.handle_interrupt(None, None)
         finally:
+            # Tor shutdown handled by atexit handler in TorManager
             # Ensure report is printed on clean exit too (if not already handled by interrupt)
             if self.running: 
                 self.print_report()
@@ -480,12 +481,43 @@ def main():
     parser.add_argument('-k', '--show-history', action='store_true', help='Show message history')
     parser.add_argument('-r', '--remove-history', help='Remove message from history')
     parser.add_argument('-u', '--update', action='store_true', help='Check for updates')
+    parser.add_argument('--clean-data', action='store_true', help='Remove all generated data (logs, cache, scanner tor)')
+    parser.add_argument('--uninstall', action='store_true', help='Clean up and show uninstall instructions')
 
     args = parser.parse_args()
 
     # Check for updates first
     if args.update:
         updater.check_for_updates()
+        return
+
+    # Clean data / Uninstall
+    if args.clean_data or args.uninstall:
+        import shutil
+        print("🧹 Cleaning generated data...")
+        
+        # Remove data folder contents
+        if config.DATA_DIR.exists():
+            for item in config.DATA_DIR.iterdir():
+                if item.is_dir():
+                    shutil.rmtree(item)
+                    print(f"   ✓ Removed {item.name}/")
+                else:
+                    item.unlink()
+                    print(f"   ✓ Removed {item.name}")
+        
+        # Remove log files in root
+        for f in ["changes.txt", "ssavr_clean.txt", "copypaste_clean.txt"]:
+            p = config.BASE_DIR / f
+            if p.exists():
+                p.unlink()
+                print(f"   ✓ Removed {f}")
+        
+        print("\n✓ All generated data removed!")
+        
+        if args.uninstall:
+            print("\n📦 To complete uninstall, remove the project folder:")
+            print(f"   rm -rf {config.BASE_DIR}")
         return
 
     # Constraints checks

@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 
 # Version and Info
-VERSION = "5.6.0"
+VERSION = "5.7.0"
 REPO_URL = "https://github.com/Jester-tek/ssavr-copypaste-scanner"
 
 # Directory Structure
@@ -32,9 +32,20 @@ CURRENT_COPYPASTE = DATA_DIR / "current_copypaste.txt"
 DISABLE_MARKER_FILE = DATA_DIR / ".disable_advanced_features"
 MARKER_ENABLED = not DISABLE_MARKER_FILE.exists()
 
-# Tor Configuration
-DEFAULT_SOCKS_PORT = 9050
-DEFAULT_CONTROL_PORT = 9051
+# Tor Configuration - SYSTEM (used by other apps - DO NOT TOUCH)
+SYSTEM_SOCKS_PORT = 9050
+SYSTEM_CONTROL_PORT = 9051
+
+# Tor Configuration - SCANNER (dedicated instance, no impact on other apps)
+SCANNER_SOCKS_PORT = 9060
+SCANNER_CONTROL_PORT = 9061
+SCANNER_TOR_DIR = DATA_DIR / "scanner_tor"  # Inside project folder
+SCANNER_TORRC = SCANNER_TOR_DIR / "torrc"
+SCANNER_TOR_DATA = SCANNER_TOR_DIR / "data"
+
+# Backwards compatibility
+DEFAULT_SOCKS_PORT = SCANNER_SOCKS_PORT
+DEFAULT_CONTROL_PORT = SCANNER_CONTROL_PORT
 
 # Performance / Timeouts
 TOR_CONNECT_TIMEOUT = 25  # Seconds to wait for Tor IP verification

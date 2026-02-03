@@ -2,6 +2,36 @@
 
 All notable changes to Tor Clipboard Scanner.
 
+## [5.7.0] - 2026-02-03
+
+### 🔒 Dedicated Tor Instance (ZERO Impact on Other Apps)
+
+Major architecture change: scanner now runs its OWN Tor daemon, completely isolated from system Tor.
+
+### Added
+- **Dedicated Tor Instance**: Scanner starts its own Tor on port 9060
+  - System Tor (9050) NEVER touched - Simplex, browsers work normally
+  - Auto-starts on script launch, auto-shuts down on exit
+  - All data inside project folder (`data/scanner_tor/`)
+- **Zero-Config Setup**: No password setup needed for new users
+  - Uses cookie authentication for self-managed Tor
+  - Works out of the box after `pip install`
+- **Uninstall Command**: `python3 main.py --uninstall`
+  - Removes all generated data
+  - Shows folder removal command
+- **Clean Data Command**: `python3 main.py --clean-data`
+  - Removes logs, cache, scanner Tor data
+  - Keeps project files intact
+
+### Changed
+- **Privacy**: ExitNodes settings only affect scanner's private Tor instance
+- **Tor Recovery**: Auto-reset circuit after 5 consecutive failures
+- Scanner Tor data moved from `~/.scanner_tor/` to `data/scanner_tor/`
+
+### Fixed
+- Rate limiting NEWNYM errors eliminated
+- Other Tor apps never affected during scans
+
 ## [5.6.0] - 2026-02-01
 
 ### Added

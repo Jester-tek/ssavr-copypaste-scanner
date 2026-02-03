@@ -2,17 +2,17 @@ everything written here is completely done by AI, even the readme.
 
 # 🌐 Tor Clipboard Scanner
 
-**v5.6.0** - Anonymous clipboard monitoring through Tor exit nodes with parallel scanning
+**v5.7.0** - Anonymous clipboard monitoring through Tor exit nodes with parallel scanning
 
 Scan ssavr.com and copy-paste.online through Tor exit nodes for maximum anonymity.
 
 ## ✨ Features
 
+- **Zero Config**: Automatic dedicated Tor instance (no system Tor modification)
 - **Parallel Scanning**: Both sites scanned simultaneously per IP
 - **Real-Time UI**: Rich terminal dashboard with live status updates
-- **IP Provider Rotation**: 5 fallback services for reliable IP verification
-- **Graceful Shutdown**: Clean exit with statistics on Ctrl+C
 - **Loop Mode**: Continuous monitoring with change detection
+- **Safe Isolation**: Scanner's Tor never affects other Tor apps (Simplex, etc.)
 
 ## 🚀 Quick Start
 
@@ -21,16 +21,11 @@ Scan ssavr.com and copy-paste.online through Tor exit nodes for maximum anonymit
 sudo apt install tor
 pip install -r requirements.txt
 
-# Setup Tor
-tor --hash-password YOUR_PASSWORD
-# Add to /etc/tor/torrc:
-# ControlPort 9051
-# HashedControlPassword 16:HASH_FROM_ABOVE
-sudo systemctl restart tor
-
-# Run
+# Run (first time will take 30-60s to start dedicated Tor)
 python3 main.py
 ```
+
+**That's it!** The scanner starts its own Tor instance automatically on port 9060. Your system Tor (port 9050) is never touched.
 
 ## 📖 Usage
 
@@ -44,86 +39,74 @@ python3 main.py -l                      # Loop mode (monitor changes)
 python3 main.py -w "Hello"              # Write to both sites
 python3 main.py -wf msg.txt             # Write from file
 python3 main.py -ts "Hi SS" -tc "Hi CP" # Different per site
-python3 main.py -tsf s.txt -tcf c.txt   # From files
+python3 main.py -l -w "Hi"              # Loop + Write combined
 
 # Advanced
 python3 main.py -w "Test" -o            # Overwrite own messages
 python3 main.py -w "Test" -a            # Overwrite EVERYTHING (⚠️)
 python3 main.py -i 100                  # Start from IP #100
 python3 main.py -b                      # Randomize order
-python3 main.py -t SS -w "Only SS"      # Target specific site
 python3 main.py -u                      # Check for updates
+
+# Maintenance
+python3 main.py --clean-data            # Remove all generated data
+python3 main.py --uninstall             # Clean + show uninstall steps
 ```
 
 ## 📁 Files
 
-### Main Directory
-- `ssavr_clean.txt` - New content from ssavr.com (no duplicates)
-- `copypaste_clean.txt` - New content from copy-paste.online (no duplicates)
-- `changes.txt` - Changes detected in loop mode
+All data stays inside the project folder:
 
-### data/ Directory
-- `ssavr_detailed.txt` - All ssavr.com reads
-- `copypaste_detailed.txt` - All copy-paste.online reads
-- `current_ssavr.txt` - Current state of all IPs (ssavr)
-- `current_copypaste.txt` - Current state of all IPs (copypaste)
-- `inputs_history.json` - Your message history
-- `debug.log` - Debug information
+```
+📂 ssavr-copypaste-scanner/
+├── ssavr_clean.txt          # New content (no duplicates)
+├── copypaste_clean.txt      # New content (no duplicates)
+├── changes.txt              # Changes detected in any mode
+└── 📂 data/
+    ├── scanner_tor/         # Dedicated Tor instance data
+    ├── ssavr_detailed.txt   # All reads
+    ├── copypaste_detailed.txt
+    ├── current_*.txt        # Current state per IP
+    ├── inputs_history.json  # Your message history
+    └── debug.log
+```
 
 ## 🔧 Options
 
 | Option | Description |
 |--------|-------------|
 | `-w TEXT` | Write to both sites |
-| `-wf FILE` | Write from file to both sites |
-| `-ts TEXT` | Write only to ssavr.com |
-| `-tsf FILE` | Write from file to ssavr.com |
-| `-tc TEXT` | Write only to copy-paste.online |
-| `-tcf FILE` | Write from file to copy-paste.online |
-| `-t SS/CP` | Target specific site |
+| `-wf FILE` | Write from file |
+| `-ts/-tc` | Write to specific site |
 | `-o` | Overwrite own messages |
 | `-a` | Overwrite ANY content (⚠️) |
 | `-s NUM` | Scan only one IP |
 | `-i NUM` | Start from IP number |
 | `-l` | Loop mode (monitor changes) |
 | `-b` | Randomize IP order |
-| `-k` | Show message history |
 | `-u` | Check for updates |
+| `--clean-data` | Remove all generated data |
+| `--uninstall` | Full cleanup |
 
-## 💡 Tips
+## 🔒 Privacy & Safety
 
-**Quotes**: Required when message contains spaces
+- **Dedicated Tor**: Scanner runs its OWN Tor instance (port 9060)
+- **System Tor Untouched**: Your other apps (Simplex, browser) use port 9050 normally
+- **No Conflicts**: ExitNodes settings only affect scanner's Tor
+- **Auto Cleanup**: Scanner's Tor shuts down when script exits
+- **All Local**: No external data collection
+
+## 🗑️ Uninstall
+
 ```bash
-✅ python3 main.py -w "Hello world"
-✅ python3 main.py -w Hello
-❌ python3 main.py -w Hello world
+python3 main.py --uninstall
+rm -rf /path/to/ssavr-copypaste-scanner
 ```
-
-**From File**: Use `-wf`, `-tsf`, `-tcf` for longer messages
-```bash
-echo "Long message here" > msg.txt
-python3 main.py -wf msg.txt
-```
-
-**Disable Advanced Features**: Create `data/.disable_advanced_features` (empty file)
-
-## 🔒 Privacy
-
-- Tor password stored locally (optional)
-- Your messages tracked in history to identify later
-- No third-party data collection
-- All connections through Tor
 
 ## 📝 Changelog
 
 See [CHANGELOG.md](CHANGELOG.md)
 
-## 🔗 Links
-
-- **Repo**: https://github.com/Jester-tek/ssavr-copypaste-scanner
-- **ssavr.com**: https://www.ssavr.com
-- **copy-paste.online**: https://copy-paste.online
-
 ---
 
-**v5.6.0** | MIT License
+**v5.7.0** | MIT License
