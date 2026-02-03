@@ -25,7 +25,9 @@ Major architecture change: scanner now runs its OWN Tor daemon, completely isola
 
 ### Changed
 - **Privacy**: ExitNodes settings only affect scanner's private Tor instance
-- **Tor Recovery**: Auto-reset circuit after 5 consecutive failures
+- **Tor Recovery**: Aggressive "Hard Reset" strategy:
+  - If IP verify fails -> Restart Torque daemon immediately -> Retry SAME IP
+  - If fails again -> Skip
 - Scanner Tor data moved from `~/.scanner_tor/` to `data/scanner_tor/`
 
 ### Fixed

@@ -375,18 +375,24 @@ class ScannerApp:
 
                 consecutive_failures = 0  # Track consecutive IP verification failures
                 
-                for i, (fingerprint, ip_address) in items_to_scan:
-                    if not self.running: break
+                items_list = list(items_to_scan)
+                idx = 0
+                retrying_current = False
+                
+                while idx < len(items_list) and self.running:
+                    i, (fingerprint, ip_address) = items_list[idx]
                     
                     # Start Display for this IP
                     display.start_ip(i, total, ip_address, loop_iteration if self.args.loop else None)
                     
                     verified = False
                     with display.console.status(f"   🔄 Verifying IP {ip_address}...", spinner="dots"):
+                        # If retrying, maybe add extra delay or log?
                         verified = self.tor.change_exit_node(fingerprint, ip_address, verbose=False)
 
                     if verified:
-                        consecutive_failures = 0  # Reset counter on success
+                        retrying_current = False # Success, reset retry flag
+                        
                         # RESET sessions to ensure independence and fresh cookies for new IP
                         self.clients["ssavr"].reset_session()
                         self.clients["copypaste"].reset_session()
@@ -403,23 +409,27 @@ class ScannerApp:
                                 args=("copypaste", ip_address, w_cp, display)
                             )
                             
-                            # Start both IMMEDIATELY
                             thread_ssavr.start()
                             thread_cp.start()
-                            
-                            # Wait for both to finish
                             thread_ssavr.join()
                             thread_cp.join()
                         
-                        # No longer printing text output buffer, relying on Rich Table.
-                    else:
-                        consecutive_failures += 1
-                        print(f"❌ Failed to switch/verify IP. Skipping... ({consecutive_failures}/5)")
+                        # Move to next IP
+                        idx += 1
                         
-                        # After 5 consecutive failures, reset Tor circuit
-                        if consecutive_failures >= 5:
+                    else:
+                        # FAILURE HANDLING
+                        if not retrying_current:
+                            # FIRST FAILURE: Reset Circuit & Retry SAME IP
+                            print(f"❌ Verification failed. Hard resetting Tor and retrying same IP...")
                             self.tor.reset_circuit()
-                            consecutive_failures = 0  # Reset counter after circuit reset
+                            retrying_current = True
+                            # Do NOT increment idx, loop will repeat same IP
+                        else:
+                            # SECOND FAILURE (After Reset): Skip this IP
+                            print(f"❌ Failed again after reset. Skipping IP {ip_address}.")
+                            retrying_current = False
+                            idx += 1 # Move to next IP
                     
                     if self.args.single: break
 

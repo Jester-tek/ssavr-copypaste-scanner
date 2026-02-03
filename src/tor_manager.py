@@ -327,28 +327,26 @@ NewCircuitPeriod 15
             return False
 
     def reset_circuit(self):
-        """Reset Tor circuit when stuck. Called after consecutive failures."""
+        """Reset Tor by RESTARTING the daemon (hard reset)."""
         try:
-            print("   🔄 Resetting Tor circuit (was stuck)...", end="", flush=True)
-            # Clear ExitNodes constraint
-            self.controller.reset_conf("ExitNodes")
-            self.controller.reset_conf("StrictNodes")
+            print("   🔄 Hard resetting Tor (consecutive failures)...", end="", flush=True)
             
-            # Send NEWNYM twice with delay
-            self.controller.signal(Signal.NEWNYM)
-            time.sleep(3)
-            self.controller.signal(Signal.NEWNYM)
+            # 1. Shutdown
+            self.shutdown_scanner_tor()
+            time.sleep(1)
             
-            # Wait for Tor to stabilize
-            time.sleep(10)
-            
-            # Create fresh session
-            self.create_fresh_session()
-            
-            print(" ✓ (reset complete)")
-            return True
+            # 2. Restart and Reconnect
+            # connect() handles start_scanner_tor internally
+            if self.connect():
+                self.create_fresh_session()
+                print(" ✓ (restarted successfully)")
+                return True
+            else:
+                print(" ✗ (restart failed)")
+                return False
+                
         except Exception as e:
-            print(f" ✗ (reset failed: {e})")
+            print(f" ✗ (error: {e})")
             utils.debug_log(f"Reset circuit error: {e}")
             return False
 
