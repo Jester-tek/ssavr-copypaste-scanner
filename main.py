@@ -42,6 +42,7 @@ class ScannerApp:
             "ssavr": {"read_fail": 0, "write_fail": 0, "verify_fail": 0},
             "copypaste": {"read_fail": 0, "write_fail": 0, "verify_fail": 0}
         }
+        self.ip_skips = 0
         self.start_time = time.time()
         
         signal.signal(signal.SIGINT, self.handle_interrupt)
@@ -69,7 +70,12 @@ class ScannerApp:
         print(f"  ❌ Verify failures: {self.stats['copypaste']['verify_fail']}")
 
         total_fails = sum(self.stats[s][k] for s in self.stats for k in self.stats[s])
-        print(f"\n🔴 Total failures: {total_fails}")
+        
+        print(f"\n[Infrastructure]")
+        print(f"  🔄 Total Tor restarts: {self.tor.restarts}")
+        print(f"  ⏩ Total IPs skipped: {self.ip_skips}")
+
+        print(f"\n🔴 Total site failures: {total_fails}")
         print("="*80)
         print("\n✓ Script terminated")
 
@@ -90,7 +96,11 @@ class ScannerApp:
             print(f"  ❌ Verify failures: {self.stats[key]['verify_fail']}")
         
         total_fails = sum(self.stats['ssavr'].values()) + sum(self.stats['copypaste'].values())
-        print(f"\n🔴 Total failures: {total_fails}")
+        print(f"\n[Infrastructure]")
+        print(f"  🔄 Total Tor restarts: {self.tor.restarts}")
+        print(f"  ⏩ Total IPs skipped: {self.ip_skips}")
+        
+        print(f"\n🔴 Total site failures: {total_fails}")
         print("="*80 + "\n")
 
     def print_startup_info(self):
@@ -428,6 +438,7 @@ class ScannerApp:
                         else:
                             # SECOND FAILURE (After Reset): Skip this IP
                             print(f"❌ Failed again after reset. Skipping IP {ip_address}.")
+                            self.ip_skips += 1
                             retrying_current = False
                             idx += 1 # Move to next IP
                     

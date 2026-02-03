@@ -18,6 +18,7 @@ class TorManager:
         self.tor_password = None
         self.tor_process = None  # Our dedicated Tor daemon
         self.using_dedicated_tor = False
+        self.restarts = 0  # Track total hard resets
         
         # Register cleanup on exit
         atexit.register(self.shutdown_scanner_tor)
@@ -329,7 +330,8 @@ NewCircuitPeriod 15
     def reset_circuit(self):
         """Reset Tor by RESTARTING the daemon (hard reset)."""
         try:
-            print("   🔄 Hard resetting Tor (consecutive failures)...", end="", flush=True)
+            print("   🔄 Hard resetting Tor...", end="", flush=True)
+            self.restarts += 1
             
             # 1. Shutdown
             self.shutdown_scanner_tor()
