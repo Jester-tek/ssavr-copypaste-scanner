@@ -235,11 +235,11 @@ NewCircuitPeriod 15
         all_nodes = []
         try:
             for desc in self.controller.get_network_statuses():
-            # Filter for functional Exit nodes: Exit + !BadExit + Running + Valid
-            # (Fast is removed to ensure we include slower but valid nodes)
-            if 'Exit' in desc.flags and 'BadExit' not in desc.flags and \
-               'Running' in desc.flags and 'Valid' in desc.flags:
-                all_nodes.append((desc.fingerprint, desc.address))
+                # Filter for functional Exit nodes: Exit + !BadExit + Running + Valid
+                # (Fast is removed to ensure we include slower but valid nodes)
+                if 'Exit' in desc.flags and 'BadExit' not in desc.flags and \
+                   'Running' in desc.flags and 'Valid' in desc.flags:
+                    all_nodes.append((desc.fingerprint, desc.address))
             
             # Deduplicate by IP
             ip_to_fingerprint = {}
