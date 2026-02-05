@@ -2,6 +2,17 @@
 
 All notable changes to Tor Clipboard Scanner.
 
+## [5.7.1] - 2026-02-05
+
+### Added
+- **Aggressive Recovery**: Script now performs a full Tor restart immediately after an IP verification failure.
+- **Improved Statistics**: Report now includes total Tor restarts and total IP skips.
+- **Infrastructure Tracking**: If an IP fails but succeeds after reset, it's no longer counted as a "failure" in final stats.
+
+### Fixed
+- **False Positive Change Detection**: Improved text normalization to ignore formatting/newline differences.
+- **Node Filtering**: Better deduplication and exclusion of non-functional exit nodes.
+
 ## [5.7.0] - 2026-02-03
 
 ### 🔒 Dedicated Tor Instance (ZERO Impact on Other Apps)

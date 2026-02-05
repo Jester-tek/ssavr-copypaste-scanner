@@ -19,9 +19,11 @@ def debug_log(message, data=None):
 def clean_text(text):
     if not text:
         return ""
-    invisible_chars = ['\u00ad', '\u200b', '\u200c', '\u200d', '\ufeff']
+    invisible_chars = ['\u00ad', '\u200b', '\u200c', '\u200d', '\ufeff', '\r']
     for char in invisible_chars:
         text = text.replace(char, '')
+    # Convert newlines to space, then collapse multiple spaces
+    text = re.sub(r'[\r\n]+', ' ', text)
     text = re.sub(r'\s+', ' ', text).strip()
     return text
 
