@@ -12,6 +12,7 @@ All notable changes to Tor Clipboard Scanner.
 ### Fixed
 - **False Positive Change Detection**: Improved text normalization to ignore formatting/newline differences.
 - **Node Filtering**: Better deduplication and exclusion of non-functional exit nodes.
+- **Refined Logs**: Change detection now ignores transitions starting from or ending in an empty state.
 
 ## [5.7.0] - 2026-02-03
 

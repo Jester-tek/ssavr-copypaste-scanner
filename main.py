@@ -248,7 +248,10 @@ class ScannerApp:
         # Change detection (Global)
         state_key = f"{ip_address}_{site_name}"
         prev_content = self.storage.current_state.get(state_key)
-        if prev_content is not None and utils.clean_text(prev_content) != clean_content:
+        prev_clean = utils.clean_text(prev_content) if prev_content else ""
+        
+        # Only log changes between two NON-EMPTY contents
+        if prev_clean and clean_content and prev_clean != clean_content:
             change_log = f"[{timestamp}] 🔄 CHANGE detected on {site_name}\n"
             change_log += f"  IP: {ip_address}\n"
             change_log += f"  BEFORE: {utils.clean_text(prev_content)}\n"
