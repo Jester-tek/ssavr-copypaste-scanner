@@ -200,21 +200,21 @@ class ScannerApp:
                 display_manager.update(site_key, msg, icon)
         
         # Check if we should skip this site
-        if self.args.target == "SS" and site_key != "ssavr": 
+        if self.args.target == "SS" and site_key != "ssavr":
             update_status("Skipped", "⏭")
-            return
-        if self.args.target == "CP" and site_key != "copypaste": 
+            return True
+        if self.args.target == "CP" and site_key != "copypaste":
             update_status("Skipped", "⏭")
-            return
+            return True
 
         update_status("Reading...", "📖")
         
         current_content = client.read()
         
         if current_content is None:
-            update_status("Failed", "❌")
+            update_status("Read Failed", "❌")
             self.stats[site_key]["read_fail"] += 1
-            return
+            return False
 
         # Update current view files
         self.storage.update_current_view_file(site_name, ip_address, current_content)
@@ -225,14 +225,10 @@ class ScannerApp:
         
         if current_content == "":
             update_status("✅ Found: [Empty]", "✅")
-            if display_manager:
-                display_manager.log(f"   [{site_name}] Found: [Empty]")
         else:
-            # Show a longer preview as requested
             preview = clean_content[:60] + "..." if len(clean_content) > 60 else clean_content
             ownership_str = " (MINE)" if is_mine else " [NEW]"
             update_status(f"✅ Found{ownership_str}: '{preview}'", "✅")
-            if display_manager: display_manager.log(f"   [{site_name}] Found{ownership_str}: '{preview}'")
 
         # Log detailed
         from datetime import datetime as dt_class
@@ -285,7 +281,7 @@ class ScannerApp:
             # If content matches what we want to write, skip
             if utils.clean_text(current_content) == utils.clean_text(write_content):
                 update_status("Message already present", "✅")
-                return
+                return True
 
             should_write = False
             write_type = ""
@@ -301,15 +297,13 @@ class ScannerApp:
                 write_type = "own overwrite"
 
             if should_write:
-                # Log what we are overwriting
-                if display_manager:
-                     if current_content == "":
-                         display_manager.log(f"   [{site_name}] Overwriting [Empty] with new message")
-                     elif is_mine:
-                         display_manager.log(f"   [{site_name}] Overwriting [Own Message]")
-                     else:
-                         preview_rm = clean_content[:80] + "..." if len(clean_content) > 80 else clean_content
-                         display_manager.log(f"[bold red]🗑  [{site_name}] Removing:[/bold red] {preview_rm}")
+                if current_content == "":
+                    update_status("Overwriting [Empty]...", "✍️")
+                elif is_mine:
+                    update_status("Overwriting [Own msg]...", "✍️")
+                else:
+                    preview_rm = clean_content[:50] + "..." if len(clean_content) > 50 else clean_content
+                    update_status(f"🗑 Removing: '{preview_rm}'", "🗑")
 
                 update_status(f"Writing ({write_type})...", "✍️")
                 if client.write(write_content):
