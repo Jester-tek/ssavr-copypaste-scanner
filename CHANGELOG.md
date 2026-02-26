@@ -2,6 +2,27 @@
 
 All notable changes to Tor Clipboard Scanner.
 
+## [6.0.4] - 2026-02-26
+
+### ✨ New Features
+- **Full Split-Screen UI**: Terminal takeover mode (`rich.Live screen=True`) fills 100% of window width and height — TOR column left, PROXIES column right
+- **Proxy Randomization via `-b`**: The `--randomize` flag now shuffles the 16k+ proxy pool in addition to Tor exit nodes
+- **Automated Install Script**: `setup.sh` installs Tor, creates a virtualenv, and installs Python dependencies automatically
+- **Counter per Proxy**: Each proxy shows `PROXY [N/Total]` counter in the right column
+
+### 🐛 Bug Fixes
+- **Deadlock Fix**: Eliminated lock contention between proxy worker threads and `rich.Live` rendering loop. Introduced a dedicated `_auto_refresh` daemon thread that re-renders at 4fps without holding the data lock
+- **Counter Bug**: `ProxyDisplayAdapter` was incrementing the global proxy counter on every log line instead of once per proxy — now correctly incremented at adapter creation time
+- **Duplicate IP in Log**: Log lines no longer show the IP address twice (it's in the column header — no need to repeat it in every line)
+- **rich.Live Assertion**: Fixed `AssertionError: refresh_per_second must be > 0` when starting the live display
+
+### 📖 Upgrade Guide
+```bash
+git pull
+source venv/bin/activate  # if using venv
+python3 main.py -l -b
+```
+
 ## [5.7.1] - 2026-02-05
 
 ### Added

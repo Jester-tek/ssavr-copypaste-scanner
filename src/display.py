@@ -56,34 +56,52 @@ class SplitScreenDisplay:
 
     # ── Rendering ───────────────────────────────────────────────
 
-    def _render(self):
-        """Build the two-column layout from the current buffers."""
+    def _render_unlocked(self):
+        """Build layout WITHOUT acquiring lock (caller must hold lock)."""
+        tor_text = Text.from_markup("\n".join(self.tor_lines)) if self.tor_lines else Text("Waiting for Tor…", style="dim")
+        proxy_text = Text.from_markup("\n".join(self.proxy_lines)) if self.proxy_lines else Text("Waiting for proxies…", style="dim")
         layout = Layout()
         layout.split_row(
             Layout(name="tor", ratio=1),
             Layout(name="proxy", ratio=1),
         )
-
-        tor_text = Text.from_markup("\n".join(self.tor_lines)) if self.tor_lines else Text("Waiting for Tor…", style="dim")
-        proxy_text = Text.from_markup("\n".join(self.proxy_lines)) if self.proxy_lines else Text("Waiting for proxies…", style="dim")
-
         layout["tor"].update(Panel(tor_text, title="[bold blue]TOR[/bold blue]", border_style="blue", box=box.ROUNDED, expand=True))
         layout["proxy"].update(Panel(proxy_text, title="[bold yellow]PROXIES[/bold yellow]", border_style="yellow", box=box.ROUNDED, expand=True))
         return layout
 
+    def _render(self):
+        """Build the two-column layout (acquires lock)."""
+        with self.lock:
+            return self._render_unlocked()
+
     def start(self):
-        """Start the Live display. Call this once when the scan begins."""
-        self.live = Live(self._render(), refresh_per_second=4, console=self.console, screen=True)
+        """Start the Live display (screen=True takes over the full terminal)."""
+        self.live = Live(self._render(), refresh_per_second=1, console=self.console, screen=True)
         self.live.start()
+        # Background refresh ticker — updates the display every 250ms without holding our lock
+        self._refresh_running = True
+        self._refresh_thread = threading.Thread(target=self._auto_refresh, daemon=True)
+        self._refresh_thread.start()
+
+    def _auto_refresh(self):
+        """Background thread: re-renders the layout at ~4fps without needing an explicit refresh() call."""
+        import time
+        while self._refresh_running and self.live:
+            try:
+                with self.lock:
+                    rendered = self._render_unlocked()
+                self.live.update(rendered)
+            except Exception:
+                pass
+            time.sleep(0.25)
 
     def refresh(self):
-        """Manually trigger a refresh of the live display."""
-        if self.live:
-            with self.lock:
-                self.live.update(self._render())
+        """Manual refresh hint — no-op since _auto_refresh handles it."""
+        pass
 
     def stop(self):
-        """Stop the Live display."""
+        """Stop the Live display and background refresh thread."""
+        self._refresh_running = False
         if self.live:
             self.live.stop()
             self.live = None
@@ -113,13 +131,13 @@ class ProxyDisplayAdapter:
     def __init__(self, split_display, proxy_addr):
         self.split = split_display
         self.proxy_addr = proxy_addr
+        self.n, self.total = split_display.start_proxy_ip(proxy_addr)
 
     def update(self, site, message, icon=None):
         pass  # Suppress table updates
 
     def log(self, text):
-        n, total = self.split.start_proxy_ip(self.proxy_addr)
-        self.split.log_proxy(self.proxy_addr, n, total, text)
+        self.split.log_proxy(self.proxy_addr, self.n, self.total, text)
         self.split.refresh()
 
     def context(self):

@@ -225,17 +225,14 @@ class ScannerApp:
         
         if current_content == "":
             update_status("✅ Found: [Empty]", "✅")
-            if display_manager and isinstance(display_manager, ProxyDisplayManager):
-                 # Standard logging if it's the proxy
-                 display_manager.log(f"   [{ip_address}] [{site_name}] Found: [Empty]")
-            elif display_manager:
-                 display_manager.log(f"   [{ip_address}] [{site_name}] Found: [Empty]")
+            if display_manager:
+                display_manager.log(f"   [{site_name}] Found: [Empty]")
         else:
             # Show a longer preview as requested
             preview = clean_content[:60] + "..." if len(clean_content) > 60 else clean_content
             ownership_str = " (MINE)" if is_mine else " [NEW]"
             update_status(f"✅ Found{ownership_str}: '{preview}'", "✅")
-            if display_manager: display_manager.log(f"   [{ip_address}] [{site_name}] Found{ownership_str}: '{preview}'")
+            if display_manager: display_manager.log(f"   [{site_name}] Found{ownership_str}: '{preview}'")
 
         # Log detailed
         from datetime import datetime as dt_class
@@ -307,13 +304,12 @@ class ScannerApp:
                 # Log what we are overwriting
                 if display_manager:
                      if current_content == "":
-                         display_manager.log(f"   [{ip_address}] [{site_name}] Overwriting [Empty] with new message")
+                         display_manager.log(f"   [{site_name}] Overwriting [Empty] with new message")
                      elif is_mine:
-                         display_manager.log(f"   [{ip_address}] [{site_name}] Overwriting [Own Message]")
+                         display_manager.log(f"   [{site_name}] Overwriting [Own Message]")
                      else:
-                         # Truncate the content preview to 80 chars
                          preview_rm = clean_content[:80] + "..." if len(clean_content) > 80 else clean_content
-                         display_manager.log(f"[bold red]🗑  [{ip_address}] [{site_name}] Removing:[/bold red] {preview_rm}")
+                         display_manager.log(f"[bold red]🗑  [{site_name}] Removing:[/bold red] {preview_rm}")
 
                 update_status(f"Writing ({write_type})...", "✍️")
                 if client.write(write_content):
