@@ -1,27 +1,34 @@
 everything written here is completely done by AI, even the readme.
 
-# 🌐 Tor Clipboard Scanner
+# 🌐 Tor & Proxy Clipboard Scanner
 
-**v5.7.0** - Anonymous clipboard monitoring through Tor exit nodes with parallel scanning
+**v6.0.0** - Anonymous clipboard monitoring through Tor exit nodes and 16,000+ free proxies with parallel scanning.
 
-Scan ssavr.com and copy-paste.online through Tor exit nodes for maximum anonymity.
+Scan ssavr.com and copy-paste.online through Tor and a massive pool of dynamic proxies for maximum anonymity and speed.
 
 ## ✨ Features
 
-- **Zero Config**: Automatic dedicated Tor instance (no system Tor modification)
-- **Parallel Scanning**: Both sites scanned simultaneously per IP
-- **Real-Time UI**: Rich terminal dashboard with live status updates
-- **Loop Mode**: Continuous monitoring with change detection
-- **Safe Isolation**: Scanner's Tor never affects other Tor apps (Simplex, etc.)
+- **Concurrent Proxy Engine**: Dynamically fetches 16,000+ free proxies from 13 sources, running 100 simultaneous threads!
+- **Split-Screen UI**: Beautiful dual-column terminal layout (Tor on left, Proxies on right).
+- **Zero Config**: Automatic dedicated Tor instance (no system Tor modification).
+- **Loop Mode**: Continuous monitoring with intelligent change detection and auto-recovery.
+- **Safe Isolation**: Scanner's Tor never affects other Tor apps (Simplex, etc.).
 
-## 🚀 Quick Start
+## 🚀 Quick Start (Automated Install)
+
+We provide a seamless setup script that installs Tor and sets up a Python virtual environment automatically:
 
 ```bash
-# Install dependencies
-sudo apt install tor
-pip install -r requirements.txt
+# 1. Download the code
+git clone https://github.com/your-repo/ssavr-copypaste-scanner.git
+cd ssavr-copypaste-scanner
 
-# Run (first time will take 30-60s to start dedicated Tor)
+# 2. Run the automated installer
+chmod +x setup.sh
+./setup.sh
+
+# 3. Start the scanner
+source venv/bin/activate
 python3 main.py
 ```
 
@@ -109,4 +116,4 @@ See [CHANGELOG.md](CHANGELOG.md)
 
 ---
 
-**v5.7.0** | MIT License
+**v6.0.0** | MIT License

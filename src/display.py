@@ -30,8 +30,7 @@ class ScanDisplay:
         self.console.rule(style="blue")
 
     def create_table(self):
-        # ... (same as before)
-        # Create a new table for render
+        # Create a new table for render (uses full width automatically!)
         table = Table(box=box.SIMPLE, show_header=False, show_edge=False, padding=0, expand=True)
         table.add_column("Site", style="bold white", width=20)
         table.add_column("Status", ratio=1)
@@ -53,12 +52,8 @@ class ScanDisplay:
 
     def log(self, w_text):
         """Log a message persistently above/below the table."""
-        # When Live is active, we can print to the console. 
-        # Rich handles the live display moving down.
         with self.lock:
              self.console.print(w_text)
-
-
 
     def update(self, site, message, icon=None):
         with self.lock:
@@ -74,3 +69,44 @@ class ScanDisplay:
         # We manually manage the Live object so we can update it from threads
         self.live = Live(self.create_table(), refresh_per_second=4, transient=False, console=self.console)
         return self.live
+
+
+class ProxyDisplayManager:
+    """A quiet display manager for background proxy threads.
+    It suppresses table updates to prevent UI tearing, but allows persistent logging.
+    Now includes a global proxy counter.
+    """
+    def __init__(self, console, proxy_total=0):
+        self.console = console
+        self.lock = threading.Lock()
+        self.proxy_total = proxy_total
+        self.proxy_count = 0
+
+    def get_and_increment_counter(self):
+        with self.lock:
+            self.proxy_count += 1
+            n = self.proxy_count
+            total = self.proxy_total or "?"
+            return n, total
+
+    def update(self, site, message, icon=None):
+        pass # Ignore table updates
+
+    def log(self, w_text):
+        """Standard log, useful if we just want to output something.
+           Use `log_proxy_result` to automatically prepend the proxy IP and counter.
+        """
+        with self.lock:
+            self.console.print(w_text)
+            
+    def log_proxy_result(self, proxy_addr, n, total, text):
+        """Formats the proxy output consistently, matching the old style but cleaner."""
+        prefix = f"[bold yellow]PROXY [{n}/{total}] | {proxy_addr}[/bold yellow]"
+        with self.lock:
+            self.console.print(f"   {prefix}  {text}")
+
+    def context(self):
+        class DummyContext:
+            def __enter__(self): pass
+            def __exit__(self, *args): pass
+        return DummyContext()

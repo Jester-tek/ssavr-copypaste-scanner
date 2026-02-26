@@ -53,6 +53,25 @@ SITE_READ_TIMEOUT = 15    # Seconds to wait for website
 SITE_RETRY_DELAY = 1      # Seconds between retries
 IP_STABILIZATION_DELAY = 0.5 # Wait before requests after IP change
 
+# Proxy Engine Configuration
+PROXY_SOURCES = [
+    "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/socks5.txt",
+    "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/socks4.txt",
+    "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/http.txt",
+    "https://cdn.jsdelivr.net/gh/proxifly/free-proxy-list@main/proxies/protocols/socks5/data.txt",
+    "https://cdn.jsdelivr.net/gh/proxifly/free-proxy-list@main/proxies/all/data.txt",
+    "https://raw.githubusercontent.com/dpangestuw/Free-Proxy/refs/heads/main/socks5_proxies.txt",
+    "https://raw.githubusercontent.com/dpangestuw/Free-Proxy/refs/heads/main/allive.txt",
+    "https://raw.githubusercontent.com/komutan234/Proxy-List-Free/main/proxies/socks5.txt",
+    "https://raw.githubusercontent.com/komutan234/Proxy-List-Free/main/proxies/http.txt",
+    "https://raw.githubusercontent.com/officialputuid/KangProxy/KangProxy/http/http.txt",
+    "https://raw.githubusercontent.com/officialputuid/KangProxy/KangProxy/xResults/Proxies.txt",
+    "https://raw.githubusercontent.com/vmheaven/VMHeaven-Free-Proxy-Updated/main/all_proxies.txt",
+    "https://api.proxyscrape.com/v2/?request=displayproxies&protocol=socks5",
+]
+PROXY_THREAD_COUNT = 100 # Number of concurrent proxy requests
+PROXY_CONNECT_TIMEOUT = 5 # Seconds to wait for a free proxy to connect
+
 def load_config():
     if CONFIG_FILE.exists():
         try:

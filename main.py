@@ -11,19 +11,26 @@ import time
 import random
 import signal
 from pathlib import Path
+from datetime import datetime
 
 # Import our modules
 # Assuming src is in the same directory or python path
 try:
-    from src import config, utils, storage, tor_manager, updater
+    from src import config, utils, storage, tor_manager, updater, proxy_manager
     from src.sites.ssavr import SsavrClient
     from src.sites.copypaste import CopyPasteClient
+    from src.display import ScanDisplay, ProxyDisplayManager
+    import requests
+    from concurrent.futures import ThreadPoolExecutor
 except ImportError:
     # If running directly from the project root without installation
     sys.path.append(str(Path(__file__).parent))
-    from src import config, utils, storage, tor_manager, updater
+    from src import config, utils, storage, tor_manager, updater, proxy_manager
     from src.sites.ssavr import SsavrClient
     from src.sites.copypaste import CopyPasteClient
+    from src.display import ScanDisplay, ProxyDisplayManager
+    import requests
+    from concurrent.futures import ThreadPoolExecutor
 
 class ScannerApp:
     def __init__(self, args):
@@ -35,14 +42,16 @@ class ScannerApp:
             control_port=args.control_port
         )
         self.clients = {
-            "ssavr": SsavrClient(self.tor),
-            "copypaste": CopyPasteClient(self.tor)
+            "ssavr": SsavrClient(self.tor.get_new_session),
+            "copypaste": CopyPasteClient(self.tor.get_new_session)
         }
         self.stats = {
-            "ssavr": {"read_fail": 0, "write_fail": 0, "verify_fail": 0},
-            "copypaste": {"read_fail": 0, "write_fail": 0, "verify_fail": 0}
+            "ssavr": {"read_fail": 0, "write_fail": 0, "verify_fail": 0, "proxy_success": 0},
+            "copypaste": {"read_fail": 0, "write_fail": 0, "verify_fail": 0, "proxy_success": 0}
         }
         self.ip_skips = 0
+        self.proxy_manager = proxy_manager.ProxyManager()
+        self.proxy_executor = None
         self.start_time = time.time()
         
         signal.signal(signal.SIGINT, self.handle_interrupt)
@@ -69,7 +78,7 @@ class ScannerApp:
         print(f"  ❌ Write failures: {self.stats['copypaste']['write_fail']}")
         print(f"  ❌ Verify failures: {self.stats['copypaste']['verify_fail']}")
 
-        total_fails = sum(self.stats[s][k] for s in self.stats for k in self.stats[s])
+        total_fails = sum(self.stats[s][k] for s in self.stats for k in self.stats[s] if k != 'proxy_success')
         
         print(f"\n[Infrastructure]")
         print(f"  🔄 Total Tor restarts: {self.tor.restarts}")
@@ -95,10 +104,11 @@ class ScannerApp:
             print(f"  ❌ Write failures: {self.stats[key]['write_fail']}")
             print(f"  ❌ Verify failures: {self.stats[key]['verify_fail']}")
         
-        total_fails = sum(self.stats['ssavr'].values()) + sum(self.stats['copypaste'].values())
+        total_fails = sum(self.stats['ssavr'].values()) + sum(self.stats['copypaste'].values()) - self.stats['ssavr']['proxy_success'] - self.stats['copypaste']['proxy_success']
         print(f"\n[Infrastructure]")
         print(f"  🔄 Total Tor restarts: {self.tor.restarts}")
         print(f"  ⏩ Total IPs skipped: {self.ip_skips}")
+        print(f"  ⚡ Proxy successes: SS({self.stats['ssavr']['proxy_success']}), CP({self.stats['copypaste']['proxy_success']})")
         
         print(f"\n🔴 Total site failures: {total_fails}")
         print("="*80 + "\n")
@@ -177,12 +187,11 @@ class ScannerApp:
         # Note: If content is None, normalize returns None (or "")
         return utils.normalize_text_output(content_ssavr), utils.normalize_text_output(content_cp)
 
-    def process_site_for_ip(self, site_key, ip_address, write_content, display_manager=None):
+    def process_site_for_ip(self, site_key, client, ip_address, write_content, display_manager=None):
         # Set immediate status to show parallelism
         if display_manager:
             display_manager.update(site_key, "Connecting...", "🔄")
             
-        client = self.clients[site_key]
         site_name = client.get_name()
         
         # Helper to update display if available
@@ -216,16 +225,21 @@ class ScannerApp:
         
         if current_content == "":
             update_status("✅ Found: [Empty]", "✅")
-            if display_manager: display_manager.log(f"   [{site_name}] Found: [Empty]")
+            if display_manager and isinstance(display_manager, ProxyDisplayManager):
+                 # Standard logging if it's the proxy
+                 display_manager.log(f"   [{ip_address}] [{site_name}] Found: [Empty]")
+            elif display_manager:
+                 display_manager.log(f"   [{ip_address}] [{site_name}] Found: [Empty]")
         else:
             # Show a longer preview as requested
             preview = clean_content[:60] + "..." if len(clean_content) > 60 else clean_content
             ownership_str = " (MINE)" if is_mine else " [NEW]"
             update_status(f"✅ Found{ownership_str}: '{preview}'", "✅")
-            if display_manager: display_manager.log(f"   [{site_name}] Found{ownership_str}: '{preview}'")
+            if display_manager: display_manager.log(f"   [{ip_address}] [{site_name}] Found{ownership_str}: '{preview}'")
 
         # Log detailed
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        from datetime import datetime as dt_class
+        timestamp = dt_class.now().strftime("%Y-%m-%d %H:%M:%S")
         status = "EMPTY" if current_content == "" else ("MINE" if is_mine else "NEW")
         self.storage.log_to_file(
             config.SSAVR_DETAILED if site_key == "ssavr" else config.COPYPASTE_DETAILED, 
@@ -290,17 +304,16 @@ class ScannerApp:
                 write_type = "own overwrite"
 
             if should_write:
-                # Log what we are overwriting if it's not empty and not mine 
-                # (Active mode implies total overwrite could nuke random stuff)
+                # Log what we are overwriting
                 if display_manager:
                      if current_content == "":
-                         display_manager.log(f"   [{site_name}] Overwriting [Empty] with new message")
+                         display_manager.log(f"   [{ip_address}] [{site_name}] Overwriting [Empty] with new message")
                      elif is_mine:
-                         display_manager.log(f"   [{site_name}] Overwriting [Own Message]")
+                         display_manager.log(f"   [{ip_address}] [{site_name}] Overwriting [Own Message]")
                      else:
-                         # Log the FULL content being removed
-                         log_msg = f"[bold red]🗑  [{site_name}] Removing content:[/bold red] {clean_content}"
-                         display_manager.log(log_msg)
+                         # Truncate the content preview to 80 chars
+                         preview_rm = clean_content[:80] + "..." if len(clean_content) > 80 else clean_content
+                         display_manager.log(f"[bold red]🗑  [{ip_address}] [{site_name}] Removing:[/bold red] {preview_rm}")
 
                 update_status(f"Writing ({write_type})...", "✍️")
                 if client.write(write_content):
@@ -314,9 +327,93 @@ class ScannerApp:
                     else:
                         update_status("Verification Failed", "❌")
                         self.stats[site_key]["verify_fail"] += 1
+                        return False
                 else:
                     update_status("Write Failed", "❌")
                     self.stats[site_key]["write_fail"] += 1
+                    return False
+        return True # If no write was performed, or if write was successful
+
+    def process_ip_with_clients(self, ip_address, clients_dict, w_ssavr, w_cp, display_manager, sequential=False):
+        """Processes both sites for a given IP address using the provided clients."""
+        # Reset sessions first
+        try:
+            clients_dict["ssavr"].reset_session()
+            clients_dict["copypaste"].reset_session()
+        except AttributeError:
+            # For proxy session factories, they just create a new session next time they are called
+            pass
+
+        def local_process_site(site_name, ip_address, write_content, display):
+            success = self.process_site_for_ip(site_name, clients_dict[site_name], ip_address, write_content, display)
+            if success:
+                self.ip_skips = 0 # reset on success
+            elif display_manager:
+                display_manager.update(site_name, "❌ Failed", "❌")
+
+        if sequential:
+            local_process_site("ssavr", ip_address, w_ssavr, display_manager)
+            local_process_site("copypaste", ip_address, w_cp, display_manager)
+        else:
+            import threading
+            thread_ssavr = threading.Thread(
+                target=local_process_site, 
+                args=("ssavr", ip_address, w_ssavr, display_manager)
+            )
+            thread_cp = threading.Thread(
+                target=local_process_site, 
+                args=("copypaste", ip_address, w_cp, display_manager)
+            )
+            
+            thread_ssavr.start()
+            thread_cp.start()
+            thread_ssavr.join()
+            thread_cp.join()
+
+    def _proxy_worker(self, w_ssavr, w_cp, proxy_manager_display):
+        """Worker thread that continuously pulls proxies and processes the sites."""
+        while self.running:
+            proxy = self.proxy_manager.get_next_proxy()
+            if not proxy:
+                time.sleep(5)
+                continue
+                
+            proxy_reqs = self.proxy_manager.get_requests_dict(proxy)
+            proxy_addr = proxy['address']
+            
+            # Bug fix #4: capture proxy_reqs by default arg to avoid late-binding closure bug
+            def proxy_session_factory(reqs=proxy_reqs):
+                session = requests.Session()
+                session.proxies.update(reqs)
+                session.timeout = config.PROXY_CONNECT_TIMEOUT
+                return session
+
+            proxy_clients = {
+                "ssavr": SsavrClient(proxy_session_factory),
+                "copypaste": CopyPasteClient(proxy_session_factory)
+            }
+            
+            try:
+                # Optional: log connecting attempt if it was slow, but it's better to just process
+                n, total = proxy_manager_display.get_and_increment_counter()
+                
+                # We format the IP so the internal lines look like proxy lines:
+                # The process_site_for_ip uses the `display_manager.log` which we will hook into.
+                # Actually, `process_site_for_ip` just uses `display_manager.log`, passing the `ip_address` param.
+                # So we can pass `[N/Total] ProxyIP` as the "ip_address"!
+                display_ip = f"PROXY [{n}/{total}] | {proxy_addr}"
+                
+                self.process_ip_with_clients(display_ip, proxy_clients, w_ssavr, w_cp, proxy_manager_display, sequential=True)
+                
+                self.stats["ssavr"]["proxy_success"] += 1
+                self.stats["copypaste"]["proxy_success"] += 1
+                
+            except requests.exceptions.RequestException:
+                self.proxy_manager.mark_failure(proxy_addr)
+            except Exception:
+                self.proxy_manager.mark_failure(proxy_addr)
+                
+            time.sleep(0.1)  # Minimal delay for maximum throughput
 
 
     def run(self):
@@ -347,17 +444,28 @@ class ScannerApp:
         if self.args.target_ssavr: self.storage.add_to_history(self.args.target_ssavr)
         if self.args.target_copypaste: self.storage.add_to_history(self.args.target_copypaste)
 
-        # Connect Tor
+        w_ssavr, w_cp = self.get_write_contents()
+        loop_iteration = 0
+        import threading
+        
+        display = ScanDisplay()
+        
+        # Connect Tor first to ensure the main script doesn't block
         self.print_startup_info()
         if not self.tor.connect():
             sys.exit(1)
 
-        w_ssavr, w_cp = self.get_write_contents()
-        loop_iteration = 0
-        import threading
-        from src.display import ScanDisplay
-        
-        display = ScanDisplay()
+        # Start Proxy Fetching and Workers IF NOT targeting single Tor IP
+        if not self.args.single:
+            print("\n🚀 Starting Proxy Engine...")
+            self.proxy_manager.fetch_proxies(randomize=self.args.randomize)
+            
+            # Setup proxy display manager with full context of total proxies
+            proxy_display = ProxyDisplayManager(display.console, proxy_total=len(self.proxy_manager.proxies))
+            
+            self.proxy_executor = ThreadPoolExecutor(max_workers=config.PROXY_THREAD_COUNT)
+            for _ in range(config.PROXY_THREAD_COUNT):
+                self.proxy_executor.submit(self._proxy_worker, w_ssavr, w_cp, proxy_display)
 
         try:
             while self.running:
@@ -400,32 +508,13 @@ class ScannerApp:
                     
                     verified = False
                     with display.console.status(f"   🔄 Verifying IP {ip_address}...", spinner="dots"):
-                        # If retrying, maybe add extra delay or log?
                         verified = self.tor.change_exit_node(fingerprint, ip_address, verbose=False)
 
                     if verified:
-                        retrying_current = False # Success, reset retry flag
+                        retrying_current = False
                         
-                        # RESET sessions to ensure independence and fresh cookies for new IP
-                        self.clients["ssavr"].reset_session()
-                        self.clients["copypaste"].reset_session()
-                        
-                        # Use Live context for the duration of processing this IP
-                        with display.context():
-                            # Use DIRECT threading for TRUE parallelism
-                            thread_ssavr = threading.Thread(
-                                target=self.process_site_for_ip, 
-                                args=("ssavr", ip_address, w_ssavr, display)
-                            )
-                            thread_cp = threading.Thread(
-                                target=self.process_site_for_ip, 
-                                args=("copypaste", ip_address, w_cp, display)
-                            )
-                            
-                            thread_ssavr.start()
-                            thread_cp.start()
-                            thread_ssavr.join()
-                            thread_cp.join()
+                        # Use the original live display format
+                        self.process_ip_with_clients(f"TOR | {ip_address}", self.clients, w_ssavr, w_cp, display)
                         
                         # Move to next IP
                         idx += 1
@@ -458,10 +547,10 @@ class ScannerApp:
         except KeyboardInterrupt:
             self.handle_interrupt(None, None)
         finally:
+            self.running = False # Stop proxy threads
+            if self.proxy_executor:
+                self.proxy_executor.shutdown(wait=False, cancel_futures=True)
             # Tor shutdown handled by atexit handler in TorManager
-            # Ensure report is printed on clean exit too (if not already handled by interrupt)
-            if self.running: 
-                self.print_report()
 
 
 # Helper to load file content
@@ -472,7 +561,7 @@ def load_file_content(filepath):
     except Exception as e:
         print(f"✗ Error reading file {filepath}: {e}")
         sys.exit(1)
-from datetime import datetime
+
 
 def main():
     parser = argparse.ArgumentParser(
