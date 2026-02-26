@@ -113,7 +113,9 @@ class TorDisplayAdapter:
         self.split = split_display
 
     def update(self, site, message, icon=None):
-        pass  # No animated table rows anymore
+        prefix = icon or "•"
+        self.split.log_tor(f"  {prefix} [bold]{site}:[/bold] {message}")
+        # no refresh needed — _auto_refresh handles it
 
     def log(self, text):
         self.split.log_tor(text)
