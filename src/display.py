@@ -1,112 +1,129 @@
 from rich.console import Console
 from rich.live import Live
-from rich.table import Table
+from rich.layout import Layout
+from rich.panel import Panel
 from rich.text import Text
 from rich import box
 import threading
+from collections import deque
 
-class ScanDisplay:
+class SplitScreenDisplay:
+    """Split-screen terminal display: Tor on the left, Proxies on the right."""
+
     def __init__(self):
         self.console = Console()
-        self.status = {
-            "ssavr": {"stage": "pending", "message": "Pending...", "icon": "⏳"},
-            "copypaste": {"stage": "pending", "message": "Pending...", "icon": "⏳"}
-        }
-        self.ip_info = ""
-        self.live = None
-        self.lock = threading.Lock()
-
-    def start_ip(self, index, total, ip_address, loop_count=None):
-        loop_info = f" [Round #{loop_count}]" if loop_count else ""
-        self.ip_info = f"🌐 IP {index}/{total}{loop_info} | {ip_address}"
-        self.status = {
-            "ssavr": {"stage": "loading", "message": "Reading...", "icon": "📖"},
-            "copypaste": {"stage": "loading", "message": "Reading...", "icon": "📖"}
-        }
-        # Print the header (rule)
-        self.console.print() 
-        self.console.rule(style="blue")
-        self.console.print(f"[bold cyan]{self.ip_info}[/bold cyan]", justify="center")
-        self.console.rule(style="blue")
-
-    def create_table(self):
-        # Create a new table for render (uses full width automatically!)
-        table = Table(box=box.SIMPLE, show_header=False, show_edge=False, padding=0, expand=True)
-        table.add_column("Site", style="bold white", width=20)
-        table.add_column("Status", ratio=1)
-        
-        # SSAVR Row
-        s_stats = self.status["ssavr"]
-        table.add_row(
-            "ssavr.com", 
-            f"{s_stats['icon']} {s_stats['message']}"
-        )
-        
-        # CopyPaste Row
-        c_stats = self.status["copypaste"]
-        table.add_row(
-            "copy-paste.online", 
-            f"{c_stats['icon']} {c_stats['message']}"
-        )
-        return table
-
-    def log(self, w_text):
-        """Log a message persistently above/below the table."""
-        with self.lock:
-             self.console.print(w_text)
-
-    def update(self, site, message, icon=None):
-        with self.lock:
-            self.status[site]["message"] = message
-            if icon:
-                self.status[site]["icon"] = icon
-            
-            # Trigger refresh if live is active
-            if self.live:
-                self.live.update(self.create_table())
-
-    def context(self):
-        # We manually manage the Live object so we can update it from threads
-        self.live = Live(self.create_table(), refresh_per_second=4, transient=False, console=self.console)
-        return self.live
-
-
-class ProxyDisplayManager:
-    """A quiet display manager for background proxy threads.
-    It suppresses table updates to prevent UI tearing, but allows persistent logging.
-    Now includes a global proxy counter.
-    """
-    def __init__(self, console, proxy_total=0):
-        self.console = console
-        self.lock = threading.Lock()
-        self.proxy_total = proxy_total
+        # Dynamically adjust to terminal size (approx 6 lines for headers/borders)
+        h = max(20, self.console.height - 6)
+        self.tor_lines = deque(maxlen=h)
+        self.proxy_lines = deque(maxlen=h)
         self.proxy_count = 0
+        self.proxy_total = 0
+        self.lock = threading.Lock()
+        self.live = None
 
-    def get_and_increment_counter(self):
+    # ── Tor column ──────────────────────────────────────────────
+
+    def start_tor_ip(self, index, total, ip_address, loop_count=None):
+        """Add an IP header to the Tor column."""
+        loop_info = f" [Round #{loop_count}]" if loop_count else ""
+        header = f"[bold cyan]🌐 IP {index}/{total}{loop_info} | {ip_address}[/bold cyan]"
+        with self.lock:
+            if self.tor_lines:
+                self.tor_lines.append("")
+            self.tor_lines.append(header)
+
+    def log_tor(self, text):
+        """Append a line to the Tor column."""
+        with self.lock:
+            self.tor_lines.append(f"  {text}")
+
+    # ── Proxy column ────────────────────────────────────────────
+
+    def start_proxy_ip(self, proxy_addr):
+        """Add a proxy header line to the Proxy column and return its number."""
         with self.lock:
             self.proxy_count += 1
             n = self.proxy_count
             total = self.proxy_total or "?"
             return n, total
 
-    def update(self, site, message, icon=None):
-        pass # Ignore table updates
+    def log_proxy(self, proxy_addr, n, total, text):
+        """Append a line to the Proxy column."""
+        with self.lock:
+            self.proxy_lines.append(f"[bold yellow]PROXY [{n}/{total}] | {proxy_addr}[/bold yellow]")
+            self.proxy_lines.append(f"  {text}")
+            self.proxy_lines.append("") # visual breathing room
 
-    def log(self, w_text):
-        """Standard log, useful if we just want to output something.
-           Use `log_proxy_result` to automatically prepend the proxy IP and counter.
-        """
-        with self.lock:
-            self.console.print(w_text)
-            
-    def log_proxy_result(self, proxy_addr, n, total, text):
-        """Formats the proxy output consistently, matching the old style but cleaner."""
-        prefix = f"[bold yellow]PROXY [{n}/{total}] | {proxy_addr}[/bold yellow]"
-        with self.lock:
-            self.console.print(f"   {prefix}  {text}")
+    # ── Rendering ───────────────────────────────────────────────
+
+    def _render(self):
+        """Build the two-column layout from the current buffers."""
+        layout = Layout()
+        layout.split_row(
+            Layout(name="tor", ratio=1),
+            Layout(name="proxy", ratio=1),
+        )
+
+        tor_text = Text.from_markup("\n".join(self.tor_lines)) if self.tor_lines else Text("Waiting for Tor…", style="dim")
+        proxy_text = Text.from_markup("\n".join(self.proxy_lines)) if self.proxy_lines else Text("Waiting for proxies…", style="dim")
+
+        layout["tor"].update(Panel(tor_text, title="[bold blue]TOR[/bold blue]", border_style="blue", box=box.ROUNDED, expand=True))
+        layout["proxy"].update(Panel(proxy_text, title="[bold yellow]PROXIES[/bold yellow]", border_style="yellow", box=box.ROUNDED, expand=True))
+        return layout
+
+    def start(self):
+        """Start the Live display. Call this once when the scan begins."""
+        self.live = Live(self._render(), refresh_per_second=4, console=self.console, screen=True)
+        self.live.start()
+
+    def refresh(self):
+        """Manually trigger a refresh of the live display."""
+        if self.live:
+            with self.lock:
+                self.live.update(self._render())
+
+    def stop(self):
+        """Stop the Live display."""
+        if self.live:
+            self.live.stop()
+            self.live = None
+
+
+class TorDisplayAdapter:
+    """Adapter passed to process_site_for_ip when called from the Tor loop."""
+    def __init__(self, split_display):
+        self.split = split_display
+
+    def update(self, site, message, icon=None):
+        pass  # No animated table rows anymore
+
+    def log(self, text):
+        self.split.log_tor(text)
+        self.split.refresh()
 
     def context(self):
-        class DummyContext:
+        class Dummy:
             def __enter__(self): pass
-            def __exit__(self, *args): pass
-        return DummyContext()
+            def __exit__(self, *a): pass
+        return Dummy()
+
+
+class ProxyDisplayAdapter:
+    """Adapter passed to process_site_for_ip when called from proxy threads."""
+    def __init__(self, split_display, proxy_addr):
+        self.split = split_display
+        self.proxy_addr = proxy_addr
+
+    def update(self, site, message, icon=None):
+        pass  # Suppress table updates
+
+    def log(self, text):
+        n, total = self.split.start_proxy_ip(self.proxy_addr)
+        self.split.log_proxy(self.proxy_addr, n, total, text)
+        self.split.refresh()
+
+    def context(self):
+        class Dummy:
+            def __enter__(self): pass
+            def __exit__(self, *a): pass
+        return Dummy()

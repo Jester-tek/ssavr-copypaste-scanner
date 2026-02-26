@@ -19,7 +19,7 @@ try:
     from src import config, utils, storage, tor_manager, updater, proxy_manager
     from src.sites.ssavr import SsavrClient
     from src.sites.copypaste import CopyPasteClient
-    from src.display import ScanDisplay, ProxyDisplayManager
+    from src.display import SplitScreenDisplay, TorDisplayAdapter, ProxyDisplayAdapter
     import requests
     from concurrent.futures import ThreadPoolExecutor
 except ImportError:
@@ -28,7 +28,7 @@ except ImportError:
     from src import config, utils, storage, tor_manager, updater, proxy_manager
     from src.sites.ssavr import SsavrClient
     from src.sites.copypaste import CopyPasteClient
-    from src.display import ScanDisplay, ProxyDisplayManager
+    from src.display import SplitScreenDisplay, TorDisplayAdapter, ProxyDisplayAdapter
     import requests
     from concurrent.futures import ThreadPoolExecutor
 
@@ -394,16 +394,12 @@ class ScannerApp:
             }
             
             try:
-                # Optional: log connecting attempt if it was slow, but it's better to just process
-                n, total = proxy_manager_display.get_and_increment_counter()
+                # Use a specific adapter for this proxy
+                proxy_adapter = ProxyDisplayAdapter(proxy_manager_display, proxy_addr)
                 
-                # We format the IP so the internal lines look like proxy lines:
-                # The process_site_for_ip uses the `display_manager.log` which we will hook into.
-                # Actually, `process_site_for_ip` just uses `display_manager.log`, passing the `ip_address` param.
-                # So we can pass `[N/Total] ProxyIP` as the "ip_address"!
-                display_ip = f"PROXY [{n}/{total}] | {proxy_addr}"
+                display_ip = f"PROXY | {proxy_addr}"
                 
-                self.process_ip_with_clients(display_ip, proxy_clients, w_ssavr, w_cp, proxy_manager_display, sequential=True)
+                self.process_ip_with_clients(display_ip, proxy_clients, w_ssavr, w_cp, proxy_adapter, sequential=True)
                 
                 self.stats["ssavr"]["proxy_success"] += 1
                 self.stats["copypaste"]["proxy_success"] += 1
@@ -448,7 +444,8 @@ class ScannerApp:
         loop_iteration = 0
         import threading
         
-        display = ScanDisplay()
+        split_display = SplitScreenDisplay()
+        tor_adapter = TorDisplayAdapter(split_display)
         
         # Connect Tor first to ensure the main script doesn't block
         self.print_startup_info()
@@ -460,12 +457,13 @@ class ScannerApp:
             print("\n🚀 Starting Proxy Engine...")
             self.proxy_manager.fetch_proxies(randomize=self.args.randomize)
             
-            # Setup proxy display manager with full context of total proxies
-            proxy_display = ProxyDisplayManager(display.console, proxy_total=len(self.proxy_manager.proxies))
+            split_display.proxy_total = len(self.proxy_manager.proxies)
             
             self.proxy_executor = ThreadPoolExecutor(max_workers=config.PROXY_THREAD_COUNT)
             for _ in range(config.PROXY_THREAD_COUNT):
-                self.proxy_executor.submit(self._proxy_worker, w_ssavr, w_cp, proxy_display)
+                self.proxy_executor.submit(self._proxy_worker, w_ssavr, w_cp, split_display)
+        
+        split_display.start()
 
         try:
             while self.running:
@@ -504,17 +502,15 @@ class ScannerApp:
                     i, (fingerprint, ip_address) = items_list[idx]
                     
                     # Start Display for this IP
-                    display.start_ip(i, total, ip_address, loop_iteration if self.args.loop else None)
+                    split_display.start_tor_ip(i, total, ip_address, loop_iteration if self.args.loop else None)
+                    split_display.refresh()
                     
-                    verified = False
-                    with display.console.status(f"   🔄 Verifying IP {ip_address}...", spinner="dots"):
-                        verified = self.tor.change_exit_node(fingerprint, ip_address, verbose=False)
+                    verified = self.tor.change_exit_node(fingerprint, ip_address, verbose=False)
 
                     if verified:
                         retrying_current = False
                         
-                        # Use the original live display format
-                        self.process_ip_with_clients(f"TOR | {ip_address}", self.clients, w_ssavr, w_cp, display)
+                        self.process_ip_with_clients(ip_address, self.clients, w_ssavr, w_cp, tor_adapter)
                         
                         # Move to next IP
                         idx += 1
@@ -523,13 +519,13 @@ class ScannerApp:
                         # FAILURE HANDLING
                         if not retrying_current:
                             # FIRST FAILURE: Reset Circuit & Retry SAME IP
-                            print(f"❌ Verification failed. Hard resetting Tor and retrying same IP...")
+                            tor_adapter.log(f"❌ Verification failed. Hard resetting Tor and retrying same IP...")
                             self.tor.reset_circuit()
                             retrying_current = True
                             # Do NOT increment idx, loop will repeat same IP
                         else:
                             # SECOND FAILURE (After Reset): Skip this IP
-                            print(f"❌ Failed again after reset. Skipping IP {ip_address}.")
+                            tor_adapter.log(f"❌ Failed again after reset. Skipping IP {ip_address}.")
                             self.ip_skips += 1
                             retrying_current = False
                             idx += 1 # Move to next IP
@@ -547,6 +543,8 @@ class ScannerApp:
         except KeyboardInterrupt:
             self.handle_interrupt(None, None)
         finally:
+            if 'split_display' in locals():
+                split_display.stop()
             self.running = False # Stop proxy threads
             if self.proxy_executor:
                 self.proxy_executor.shutdown(wait=False, cancel_futures=True)
