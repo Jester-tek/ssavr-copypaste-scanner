@@ -396,10 +396,18 @@ class ScannerApp:
                 self.stats["ssavr"]["proxy_success"] += 1
                 self.stats["copypaste"]["proxy_success"] += 1
                 
-            except requests.exceptions.RequestException:
+            except requests.exceptions.Timeout:
                 self.proxy_manager.mark_failure(proxy_addr)
-            except Exception:
+                utils.debug_log(f"Proxy Timeout: {proxy_addr}")
+            except requests.exceptions.ProxyError as e:
                 self.proxy_manager.mark_failure(proxy_addr)
+                utils.debug_log(f"Proxy Error: {proxy_addr}", str(e))
+            except requests.exceptions.ConnectionError:
+                self.proxy_manager.mark_failure(proxy_addr)
+                utils.debug_log(f"Proxy ConnError: {proxy_addr}")
+            except Exception as e:
+                self.proxy_manager.mark_failure(proxy_addr)
+                utils.debug_log(f"Proxy Worker Exception: {proxy_addr}", str(e))
                 
             time.sleep(0.1)  # Minimal delay for maximum throughput
 

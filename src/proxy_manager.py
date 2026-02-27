@@ -14,23 +14,33 @@ class ProxyManager:
         print("🌍 Fetching free proxies from sources...", flush=True)
         raw_proxies = set()
         
-        for source in self.sources:
+        # Shuffle sources to distribute load and vary initial batch
+        sources_list = list(self.sources)
+        random.shuffle(sources_list)
+        
+        for source in sources_list:
             try:
                 # Add a small timeout to not hang on dead sources
                 response = requests.get(source, timeout=10)
                 if response.status_code == 200:
                     text = response.text
-                    # Extract IP:PORT lines
-                    found = re.findall(r'[0-9]+(?:\.[0-9]+){3}:[0-9]+', text)
+                    # Extract protocol://IP:PORT or just IP:PORT
+                    # Protocol is optional: (?:(https?|socks[45])://)?
+                    found = re.findall(r'(?:(?:(https?|socks[45])://))?([0-9]+(?:\.[0-9]+){3}:[0-9]+)', text, re.IGNORECASE)
+                    
                     if found:
-                        protocol = self._guess_protocol(source, text)
-                        for p in found:
-                            raw_proxies.add((p, protocol))
-                        print(f"  ✓ {source.split('/')[-1]}: Found {len(found)} proxies ({protocol})", flush=True)
+                        source_protocol = self._guess_protocol_from_url(source)
+                        count = 0
+                        for proto_group, addr in found:
+                            # Use protocol from line if present, else fallback to source-based guess
+                            protocol = proto_group.lower() if proto_group else source_protocol
+                            raw_proxies.add((addr, protocol))
+                            count += 1
+                        print(f"  ✓ {source.split('/')[-1][:20]}: Found {count} proxies", flush=True)
                     else:
-                        print(f"  ✗ {source.split('/')[-1]}: No proxies found in payload", flush=True)
+                        print(f"  ✗ {source.split('/')[-1][:20]}: No proxies found", flush=True)
             except Exception as e:
-                print(f"  ✗ {source.split('/')[-1]}: Failed to fetch ({e})")
+                print(f"  ✗ {source.split('/')[-1][:20]}: Failed ({type(e).__name__})")
                 
         # Populate our list
         self.proxies = [{'address': p[0], 'protocol': p[1], 'fails': 0} for p in raw_proxies]
@@ -40,14 +50,11 @@ class ProxyManager:
         if randomize:
             random.shuffle(self.proxies)
         
-    def _guess_protocol(self, source_url, payload_text):
-        """Simple heuristic to guess protocol based on URL or content"""
+    def _guess_protocol_from_url(self, source_url):
+        """Guess protocol based on URL string"""
         url_lower = source_url.lower()
         if 'socks5' in url_lower: return 'socks5'
         if 'socks4' in url_lower: return 'socks4'
-        if 'http' in url_lower: return 'http'
-        
-        # If url doesn't say, default to http
         return 'http'
         
     def get_next_proxy(self):

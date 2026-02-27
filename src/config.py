@@ -69,8 +69,8 @@ PROXY_SOURCES = [
     "https://raw.githubusercontent.com/vmheaven/VMHeaven-Free-Proxy-Updated/main/all_proxies.txt",
     "https://api.proxyscrape.com/v2/?request=displayproxies&protocol=socks5",
 ]
-PROXY_THREAD_COUNT = 100 # Number of concurrent proxy requests
-PROXY_CONNECT_TIMEOUT = 5 # Seconds to wait for a free proxy to connect
+PROXY_THREAD_COUNT = 60 # Number of concurrent proxy requests
+PROXY_CONNECT_TIMEOUT = 12 # Seconds to wait for a free proxy to connect
 
 def load_config():
     if CONFIG_FILE.exists():
