@@ -89,6 +89,10 @@ class ScannerApp:
         print("\n✓ Script terminated")
 
     def handle_interrupt(self, sig, frame):
+        # Stop the live display first so the report goes to the real terminal
+        if hasattr(self, 'split_display') and self.split_display:
+            self.split_display.stop()
+            self.split_display = None
         print("\n🛑 USER INTERRUPT (Stopping gracefully...)")
         self.print_report()
         self.running = False
@@ -336,9 +340,7 @@ class ScannerApp:
 
         def local_process_site(site_name, ip_address, write_content, display):
             success = self.process_site_for_ip(site_name, clients_dict[site_name], ip_address, write_content, display)
-            if success:
-                self.ip_skips = 0 # reset on success
-            elif display_manager:
+            if success is False:
                 display_manager.update(site_name, "❌ Failed", "❌")
 
         if sequential:
@@ -435,6 +437,7 @@ class ScannerApp:
         import threading
         
         split_display = SplitScreenDisplay()
+        self.split_display = split_display  # Store for handle_interrupt
         tor_adapter = TorDisplayAdapter(split_display)
         
         # Connect Tor first to ensure the main script doesn't block
@@ -533,8 +536,9 @@ class ScannerApp:
         except KeyboardInterrupt:
             self.handle_interrupt(None, None)
         finally:
-            if 'split_display' in locals():
-                split_display.stop()
+            if hasattr(self, 'split_display') and self.split_display:
+                self.split_display.stop()
+                self.split_display = None
             self.running = False # Stop proxy threads
             if self.proxy_executor:
                 self.proxy_executor.shutdown(wait=False, cancel_futures=True)

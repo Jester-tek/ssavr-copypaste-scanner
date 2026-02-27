@@ -93,7 +93,7 @@ class SplitScreenDisplay:
                 self.live.update(rendered)
             except Exception:
                 pass
-            time.sleep(0.25)
+            time.sleep(0.05)
 
     def refresh(self):
         """Manual refresh hint — no-op since _auto_refresh handles it."""
@@ -136,7 +136,8 @@ class ProxyDisplayAdapter:
         self.n, self.total = split_display.start_proxy_ip(proxy_addr)
 
     def update(self, site, message, icon=None):
-        pass  # Suppress table updates
+        prefix = icon or "•"
+        self.split.log_proxy(self.proxy_addr, self.n, self.total, f"{prefix} [bold]{site}:[/bold] {message}")
 
     def log(self, text):
         self.split.log_proxy(self.proxy_addr, self.n, self.total, text)
