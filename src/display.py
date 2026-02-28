@@ -20,6 +20,8 @@ class SplitScreenDisplay:
         self.proxy_total = 0
         self.proxy_success = 0
         self.proxy_fail = 0
+        self.tor_success = 0
+        self.tor_fail = 0
         self.lock = threading.Lock()
         self.live = None
 
@@ -67,7 +69,12 @@ class SplitScreenDisplay:
             Layout(name="tor", ratio=1),
             Layout(name="proxy", ratio=1),
         )
-        layout["tor"].update(Panel(tor_text, title="[bold blue]TOR[/bold blue]", border_style="blue", box=box.ROUNDED, expand=True))
+        # Build Tor title with live stats
+        if self.tor_success or self.tor_fail:
+            tor_title = f"[bold blue]TOR[/bold blue]  [green]✓ {self.tor_success}[/green] [red]✗ {self.tor_fail}[/red]"
+        else:
+            tor_title = "[bold blue]TOR[/bold blue]"
+        layout["tor"].update(Panel(tor_text, title=tor_title, border_style="blue", box=box.ROUNDED, expand=True))
         # Build proxy title with live stats
         if self.proxy_success or self.proxy_fail:
             proxy_title = f"[bold yellow]PROXIES[/bold yellow]  [green]✓ {self.proxy_success}[/green] [red]✗ {self.proxy_fail}[/red]"
@@ -118,9 +125,12 @@ class TorDisplayAdapter:
     """Adapter passed to process_site_for_ip when called from the Tor loop."""
     def __init__(self, split_display):
         self.split = split_display
+        self.had_failure = False
 
     def update(self, site, message, icon=None):
         prefix = icon or "•"
+        if "Failed" in message or "❌" in message:
+            self.had_failure = True
         self.split.log_tor(f"  {prefix} [bold]{site}:[/bold] {message}")
         # no refresh needed — _auto_refresh handles it
 

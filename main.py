@@ -514,11 +514,21 @@ class ScannerApp:
                         
                         self.process_ip_with_clients(ip_address, self.clients, w_ssavr, w_cp, tor_adapter)
                         
+                        # Track Tor success/fail based on adapter
+                        with split_display.lock:
+                            if tor_adapter.had_failure:
+                                split_display.tor_fail += 1
+                            else:
+                                split_display.tor_success += 1
+                        
                         # Move to next IP
                         idx += 1
                         
                     else:
                         # FAILURE HANDLING
+                        with split_display.lock:
+                            split_display.tor_fail += 1
+                        
                         if not retrying_current:
                             # FIRST FAILURE: Reset Circuit & Retry SAME IP
                             tor_adapter.log(f"❌ Verification failed. Hard resetting Tor and retrying same IP...")
