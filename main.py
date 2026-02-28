@@ -345,16 +345,21 @@ class ScannerApp:
             return success
 
         if sequential:
-            local_process_site("ssavr", ip_address, w_ssavr, display_manager)
-            local_process_site("copypaste", ip_address, w_cp, display_manager)
+            s_ssavr = local_process_site("ssavr", ip_address, w_ssavr, display_manager)
+            s_cp = local_process_site("copypaste", ip_address, w_cp, display_manager)
+            return s_ssavr, s_cp
         else:
+            results = {"ssavr": False, "copypaste": False}
+            def thread_target(site_name, ip_address, write_content, display):
+                results[site_name] = local_process_site(site_name, ip_address, write_content, display)
+                
             import threading
             thread_ssavr = threading.Thread(
-                target=local_process_site, 
+                target=thread_target, 
                 args=("ssavr", ip_address, w_ssavr, display_manager)
             )
             thread_cp = threading.Thread(
-                target=local_process_site, 
+                target=thread_target, 
                 args=("copypaste", ip_address, w_cp, display_manager)
             )
             
@@ -362,6 +367,8 @@ class ScannerApp:
             thread_cp.start()
             thread_ssavr.join()
             thread_cp.join()
+            
+            return results["ssavr"], results["copypaste"]
 
     def _proxy_worker(self, w_ssavr, w_cp, proxy_manager_display):
         """Worker thread that continuously pulls proxies and processes the sites."""
@@ -392,18 +399,20 @@ class ScannerApp:
                 
                 display_ip = f"PROXY | {proxy_addr}"
                 
-                self.process_ip_with_clients(display_ip, proxy_clients, w_ssavr, w_cp, proxy_adapter, sequential=True)
+                ssavr_success, cp_success = self.process_ip_with_clients(display_ip, proxy_clients, w_ssavr, w_cp, proxy_adapter, sequential=True)
                 
-                # Track success/fail based on what the adapter observed
-                if proxy_adapter.had_failure:
+                # A proxy is successful if it can read/write on AT LEAST ONE site.
+                if ssavr_success or cp_success:
+                    with proxy_manager_display.lock:
+                        proxy_manager_display.proxy_success += 1
+                    if ssavr_success:
+                        self.stats["ssavr"]["proxy_success"] += 1
+                    if cp_success:
+                        self.stats["copypaste"]["proxy_success"] += 1
+                else:
                     self.proxy_manager.mark_failure(proxy_addr)
                     with proxy_manager_display.lock:
                         proxy_manager_display.proxy_fail += 1
-                else:
-                    self.stats["ssavr"]["proxy_success"] += 1
-                    self.stats["copypaste"]["proxy_success"] += 1
-                    with proxy_manager_display.lock:
-                        proxy_manager_display.proxy_success += 1
                 
             except Exception:
                 self.proxy_manager.mark_failure(proxy_addr)
@@ -512,14 +521,14 @@ class ScannerApp:
                     if verified:
                         retrying_current = False
                         
-                        self.process_ip_with_clients(ip_address, self.clients, w_ssavr, w_cp, tor_adapter)
+                        ssavr_success, cp_success = self.process_ip_with_clients(ip_address, self.clients, w_ssavr, w_cp, tor_adapter)
                         
-                        # Track Tor success/fail based on adapter
+                        # Track Tor success/fail based on actual returned success flags
                         with split_display.lock:
-                            if tor_adapter.had_failure:
-                                split_display.tor_fail += 1
-                            else:
+                            if ssavr_success or cp_success:
                                 split_display.tor_success += 1
+                            else:
+                                split_display.tor_fail += 1
                         
                         # Move to next IP
                         idx += 1
