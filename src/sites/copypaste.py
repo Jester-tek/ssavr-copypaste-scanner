@@ -22,13 +22,14 @@ class CopyPasteClient(BaseSite):
         }
 
     def read(self):
-        max_retries = 2
+        timeout = getattr(self.session, 'timeout', config.SITE_READ_TIMEOUT)
+        max_retries = 0 if timeout < config.SITE_READ_TIMEOUT else 2
         retry_delay = config.SITE_RETRY_DELAY
         
         for attempt in range(max_retries + 1):
             try:
                 headers = self._get_headers()
-                response = self.session.get('https://copy-paste.online/', headers=headers, timeout=config.SITE_READ_TIMEOUT)
+                response = self.session.get('https://copy-paste.online/', headers=headers, timeout=timeout)
                 
                 # Check for rate limits or paywalls specific to this site
                 # content "user agents" is present in normal page, so we removed that check.
@@ -79,7 +80,8 @@ class CopyPasteClient(BaseSite):
         try:
             # 1. Initial Visit (cookies/headers)
             headers = self._get_headers()
-            self.session.get('https://copy-paste.online/', headers=headers, timeout=30)
+            timeout = getattr(self.session, 'timeout', 30)
+            self.session.get('https://copy-paste.online/', headers=headers, timeout=timeout)
             time.sleep(0.5)
             
             # 2. Prepare POST
@@ -93,7 +95,7 @@ class CopyPasteClient(BaseSite):
             data_encoded = base64.b64encode(content.encode('utf-8')).decode('ascii')
             post_data = {'fname': 'copypaste', 'data': data_encoded, 'mycode': ''}
             
-            response = self.session.post('https://copy-paste.online/func/func.php', data=post_data, headers=headers_post, timeout=30)
+            response = self.session.post('https://copy-paste.online/func/func.php', data=post_data, headers=headers_post, timeout=timeout)
             
             # Success is usually strictly returning a digit or 200 OK
             if response.status_code == 200 and response.text.strip().isdigit():

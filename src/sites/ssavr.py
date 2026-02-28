@@ -41,13 +41,14 @@ class SsavrClient(BaseSite):
         return None
 
     def read(self):
-        max_retries = 2
+        timeout = getattr(self.session, 'timeout', 30)
+        max_retries = 0 if timeout < 30 else 2  # No retries for proxy sessions
         retry_delay = 2
         
         for attempt in range(max_retries + 1):
             try:
                 headers = self._get_headers()
-                response = self.session.get('https://www.ssavr.com/', headers=headers, timeout=30)
+                response = self.session.get('https://www.ssavr.com/', headers=headers, timeout=timeout)
                 
                 if response.status_code != 200:
                     utils.debug_log(f"Ssavr non-200: {response.status_code}", f"Body: {response.text[:200]}")
@@ -102,7 +103,8 @@ class SsavrClient(BaseSite):
             headers['Referer'] = 'https://www.ssavr.com/'
             
             post_data = {'_token': csrf_token, 'savr': content}
-            response = self.session.post('https://www.ssavr.com/save', data=post_data, headers=headers, timeout=30)
+            timeout = getattr(self.session, 'timeout', 30)
+            response = self.session.post('https://www.ssavr.com/save', data=post_data, headers=headers, timeout=timeout)
             
             if response.status_code == 200:
                 try:

@@ -18,6 +18,8 @@ class SplitScreenDisplay:
         self.proxy_lines = deque(maxlen=h)
         self.proxy_count = 0
         self.proxy_total = 0
+        self.proxy_success = 0
+        self.proxy_fail = 0
         self.lock = threading.Lock()
         self.live = None
 
@@ -66,7 +68,12 @@ class SplitScreenDisplay:
             Layout(name="proxy", ratio=1),
         )
         layout["tor"].update(Panel(tor_text, title="[bold blue]TOR[/bold blue]", border_style="blue", box=box.ROUNDED, expand=True))
-        layout["proxy"].update(Panel(proxy_text, title="[bold yellow]PROXIES[/bold yellow]", border_style="yellow", box=box.ROUNDED, expand=True))
+        # Build proxy title with live stats
+        if self.proxy_success or self.proxy_fail:
+            proxy_title = f"[bold yellow]PROXIES[/bold yellow]  [green]✓ {self.proxy_success}[/green] [red]✗ {self.proxy_fail}[/red]"
+        else:
+            proxy_title = "[bold yellow]PROXIES[/bold yellow]"
+        layout["proxy"].update(Panel(proxy_text, title=proxy_title, border_style="yellow", box=box.ROUNDED, expand=True))
         return layout
 
     def _render(self):
@@ -134,9 +141,12 @@ class ProxyDisplayAdapter:
         self.split = split_display
         self.proxy_addr = proxy_addr
         self.n, self.total = split_display.start_proxy_ip(proxy_addr)
+        self.had_failure = False
 
     def update(self, site, message, icon=None):
         prefix = icon or "•"
+        if "Failed" in message or "❌" in message:
+            self.had_failure = True
         self.split.log_proxy(self.proxy_addr, self.n, self.total, f"{prefix} [bold]{site}:[/bold] {message}")
 
     def log(self, text):

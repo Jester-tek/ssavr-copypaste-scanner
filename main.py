@@ -342,6 +342,7 @@ class ScannerApp:
             success = self.process_site_for_ip(site_name, clients_dict[site_name], ip_address, write_content, display)
             if success is False:
                 display_manager.update(site_name, "❌ Failed", "❌")
+            return success
 
         if sequential:
             local_process_site("ssavr", ip_address, w_ssavr, display_manager)
@@ -393,21 +394,21 @@ class ScannerApp:
                 
                 self.process_ip_with_clients(display_ip, proxy_clients, w_ssavr, w_cp, proxy_adapter, sequential=True)
                 
-                self.stats["ssavr"]["proxy_success"] += 1
-                self.stats["copypaste"]["proxy_success"] += 1
+                # Track success/fail based on what the adapter observed
+                if proxy_adapter.had_failure:
+                    self.proxy_manager.mark_failure(proxy_addr)
+                    with proxy_manager_display.lock:
+                        proxy_manager_display.proxy_fail += 1
+                else:
+                    self.stats["ssavr"]["proxy_success"] += 1
+                    self.stats["copypaste"]["proxy_success"] += 1
+                    with proxy_manager_display.lock:
+                        proxy_manager_display.proxy_success += 1
                 
-            except requests.exceptions.Timeout:
+            except Exception:
                 self.proxy_manager.mark_failure(proxy_addr)
-                utils.debug_log(f"Proxy Timeout: {proxy_addr}")
-            except requests.exceptions.ProxyError as e:
-                self.proxy_manager.mark_failure(proxy_addr)
-                utils.debug_log(f"Proxy Error: {proxy_addr}", str(e))
-            except requests.exceptions.ConnectionError:
-                self.proxy_manager.mark_failure(proxy_addr)
-                utils.debug_log(f"Proxy ConnError: {proxy_addr}")
-            except Exception as e:
-                self.proxy_manager.mark_failure(proxy_addr)
-                utils.debug_log(f"Proxy Worker Exception: {proxy_addr}", str(e))
+                with proxy_manager_display.lock:
+                    proxy_manager_display.proxy_fail += 1
                 
             time.sleep(0.1)  # Minimal delay for maximum throughput
 
