@@ -89,13 +89,12 @@ class ScannerApp:
         print("\n✓ Script terminated")
 
     def handle_interrupt(self, sig, frame):
+        self.running = False
         # Stop the live display first so the report goes to the real terminal
         if hasattr(self, 'split_display') and self.split_display:
             self.split_display.stop()
             self.split_display = None
         print("\n🛑 USER INTERRUPT (Stopping gracefully...)")
-        self.print_report()
-        self.running = False
 
     def print_stats(self):
         print("\n" + "="*80)
@@ -564,10 +563,13 @@ class ScannerApp:
         except KeyboardInterrupt:
             self.handle_interrupt(None, None)
         finally:
+            self.running = False # Stop proxy threads
             if hasattr(self, 'split_display') and self.split_display:
                 self.split_display.stop()
                 self.split_display = None
-            self.running = False # Stop proxy threads
+            
+            self.print_report()
+            
             if self.proxy_executor:
                 self.proxy_executor.shutdown(wait=False, cancel_futures=True)
             # Tor shutdown handled by atexit handler in TorManager
