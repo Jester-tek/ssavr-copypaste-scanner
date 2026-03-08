@@ -8,7 +8,7 @@ class StorageManager:
     def __init__(self):
         self.history = self._load_history()
         self.current_state = self._load_current_state()
-        self.clean_cache = {"ssavr": {}, "copypaste": {}}
+        self.clean_cache = {"ssavr": {}, "copypaste": {}, "airforshare": {}}
         self._load_clean_cache()
 
     def _load_history(self):
@@ -54,7 +54,8 @@ class StorageManager:
     def _load_clean_cache(self):
         self._load_cache_file(config.SSAVR_CLEAN, "ssavr")
         self._load_cache_file(config.COPYPASTE_CLEAN, "copypaste")
-        print(f"📋 Loaded clean cache: {len(self.clean_cache['ssavr'])} ssavr, {len(self.clean_cache['copypaste'])} copypaste")
+        self._load_cache_file(config.AIRFORSHARE_CLEAN, "airforshare")
+        print(f"📋 Loaded clean cache: {len(self.clean_cache['ssavr'])} ssavr, {len(self.clean_cache['copypaste'])} copypaste, {len(self.clean_cache['airforshare'])} airforshare")
 
     def _load_cache_file(self, filepath, key):
         if Path(filepath).exists():
@@ -86,7 +87,12 @@ class StorageManager:
         Re-implements logic to preserve multi-line content for other IPs.
         """
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        filename = config.CURRENT_SSAVR if "ssavr" in site_name else config.CURRENT_COPYPASTE
+        if "ssavr" in site_name:
+            filename = config.CURRENT_SSAVR
+        elif "airforshare" in site_name:
+            filename = config.CURRENT_AIRFORSHARE
+        else:
+            filename = config.CURRENT_COPYPASTE
         
         current_data = {}
         

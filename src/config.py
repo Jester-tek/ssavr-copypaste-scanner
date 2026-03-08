@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 
 # Version and Info
-VERSION = "5.7.1"
+VERSION = "5.8.0"
 REPO_URL = "https://github.com/Jester-tek/ssavr-copypaste-scanner"
 
 # Directory Structure
@@ -21,12 +21,15 @@ DEBUG_LOG = DATA_DIR / "debug.log"
 
 SSAVR_CLEAN = "ssavr_clean.txt"
 COPYPASTE_CLEAN = "copypaste_clean.txt"
+AIRFORSHARE_CLEAN = "airforshare_clean.txt"
 CHANGES_FILE = "changes.txt"
 
 SSAVR_DETAILED = DATA_DIR / "ssavr_detailed.txt"
 COPYPASTE_DETAILED = DATA_DIR / "copypaste_detailed.txt"
+AIRFORSHARE_DETAILED = DATA_DIR / "airforshare_detailed.txt"
 CURRENT_SSAVR = DATA_DIR / "current_ssavr.txt"
 CURRENT_COPYPASTE = DATA_DIR / "current_copypaste.txt"
+CURRENT_AIRFORSHARE = DATA_DIR / "current_airforshare.txt"
 
 # Feature Flags
 DISABLE_MARKER_FILE = DATA_DIR / ".disable_advanced_features"

@@ -19,6 +19,7 @@ try:
     from src import config, utils, storage, tor_manager, updater, proxy_manager
     from src.sites.ssavr import SsavrClient
     from src.sites.copypaste import CopyPasteClient
+    from src.sites.airforshare import AirForShareClient
     from src.display import SplitScreenDisplay, TorDisplayAdapter, ProxyDisplayAdapter
     import requests
     from concurrent.futures import ThreadPoolExecutor
@@ -28,6 +29,7 @@ except ImportError:
     from src import config, utils, storage, tor_manager, updater, proxy_manager
     from src.sites.ssavr import SsavrClient
     from src.sites.copypaste import CopyPasteClient
+    from src.sites.airforshare import AirForShareClient
     from src.display import SplitScreenDisplay, TorDisplayAdapter, ProxyDisplayAdapter
     import requests
     from concurrent.futures import ThreadPoolExecutor
@@ -43,11 +45,13 @@ class ScannerApp:
         )
         self.clients = {
             "ssavr": SsavrClient(self.tor.get_new_session),
-            "copypaste": CopyPasteClient(self.tor.get_new_session)
+            "copypaste": CopyPasteClient(self.tor.get_new_session),
+            "airforshare": AirForShareClient(self.tor.get_new_session)
         }
         self.stats = {
             "ssavr": {"read_fail": 0, "write_fail": 0, "verify_fail": 0, "proxy_success": 0},
-            "copypaste": {"read_fail": 0, "write_fail": 0, "verify_fail": 0, "proxy_success": 0}
+            "copypaste": {"read_fail": 0, "write_fail": 0, "verify_fail": 0, "proxy_success": 0},
+            "airforshare": {"read_fail": 0, "write_fail": 0, "verify_fail": 0, "proxy_success": 0}
         }
         self.ip_skips = 0
         self.proxy_manager = proxy_manager.ProxyManager()
@@ -78,6 +82,11 @@ class ScannerApp:
         print(f"  ❌ Write failures: {self.stats['copypaste']['write_fail']}")
         print(f"  ❌ Verify failures: {self.stats['copypaste']['verify_fail']}")
 
+        print(f"\n[airforshare.com]")
+        print(f"  ❌ Read failures: {self.stats['airforshare']['read_fail']}")
+        print(f"  ❌ Write failures: {self.stats['airforshare']['write_fail']}")
+        print(f"  ❌ Verify failures: {self.stats['airforshare']['verify_fail']}")
+
         total_fails = sum(self.stats[s][k] for s in self.stats for k in self.stats[s] if k != 'proxy_success')
         
         print(f"\n[Infrastructure]")
@@ -100,18 +109,18 @@ class ScannerApp:
         print("\n" + "="*80)
         print("📊 STATISTICS")
         print("="*80)
-        for key in ["ssavr", "copypaste"]:
-            name = key.replace("copypaste", "copy-paste.online").replace("ssavr", "ssavr.com")
+        for key in ["ssavr", "copypaste", "airforshare"]:
+            name = key.replace("copypaste", "copy-paste.online").replace("ssavr", "ssavr.com").replace("airforshare", "airforshare.com")
             print(f"\n[{name}]")
             print(f"  ❌ Read failures: {self.stats[key]['read_fail']}")
             print(f"  ❌ Write failures: {self.stats[key]['write_fail']}")
             print(f"  ❌ Verify failures: {self.stats[key]['verify_fail']}")
         
-        total_fails = sum(self.stats['ssavr'].values()) + sum(self.stats['copypaste'].values()) - self.stats['ssavr']['proxy_success'] - self.stats['copypaste']['proxy_success']
+        total_fails = sum(self.stats['ssavr'].values()) + sum(self.stats['copypaste'].values()) + sum(self.stats['airforshare'].values()) - self.stats['ssavr']['proxy_success'] - self.stats['copypaste']['proxy_success'] - self.stats['airforshare']['proxy_success']
         print(f"\n[Infrastructure]")
         print(f"  🔄 Total Tor restarts: {self.tor.restarts}")
         print(f"  ⏩ Total IPs skipped: {self.ip_skips}")
-        print(f"  ⚡ Proxy successes: SS({self.stats['ssavr']['proxy_success']}), CP({self.stats['copypaste']['proxy_success']})")
+        print(f"  ⚡ Proxy successes: SS({self.stats['ssavr']['proxy_success']}), CP({self.stats['copypaste']['proxy_success']}), AF({self.stats['airforshare']['proxy_success']})")
         
         print(f"\n🔴 Total site failures: {total_fails}")
         print("="*80 + "\n")
@@ -140,19 +149,22 @@ class ScannerApp:
         print("\n🎯 TARGETS:")
         if self.args.target == "SS": print("  📌 ssavr.com only")
         elif self.args.target == "CP": print("  📌 copy-paste.online only")
+        elif self.args.target == "AF": print("  📌 airforshare.com only")
         else:
             print("  📌 ssavr.com")
             print("  📌 copy-paste.online")
+            print("  📌 airforshare.com")
 
         # Determine if we are writing anything
-        w_ssavr, w_cp = self.get_write_contents()
-        if w_ssavr or w_cp:
+        w_ssavr, w_cp, w_af = self.get_write_contents()
+        if w_ssavr or w_cp or w_af:
             print("\n✍️  MESSAGES TO WRITE:")
-            if w_ssavr == w_cp and w_ssavr:
-                print(f"  📝 Both sites: '{w_ssavr[:50]}...'")
+            if w_ssavr == w_cp == w_af and w_ssavr:
+                print(f"  📝 All sites: '{w_ssavr[:50]}...'")
             else:
                 if w_ssavr: print(f"  📝 ssavr.com: '{w_ssavr[:50]}...'")
                 if w_cp: print(f"  📝 copy-paste.online: '{w_cp[:50]}...'")
+                if w_af: print(f"  📝 airforshare.com: '{w_af[:50]}...'")
         else:
             print("\n📖 MODE: Read only")
         print("="*80 + "\n")
@@ -168,27 +180,35 @@ class ScannerApp:
         
         content_ssavr = None
         content_cp = None
+        content_af = None
 
         # General write arg
         if self.args.write:
             content_ssavr = self.args.write
             content_cp = self.args.write
+            content_af = self.args.write
 
         # Specific overrides
         if self.args.target_ssavr:
             content_ssavr = self.args.target_ssavr
         if self.args.target_copypaste:
             content_cp = self.args.target_copypaste
+        if self.args.target_airforshare:
+            content_af = self.args.target_airforshare
 
         # Filter by target site arg
         if self.args.target == "SS":
             content_cp = None
+            content_af = None
         elif self.args.target == "CP":
             content_ssavr = None
+            content_af = None
+        elif self.args.target == "AF":
+            content_ssavr = None
+            content_cp = None
 
         # Normalize (add marker)
-        # Note: If content is None, normalize returns None (or "")
-        return utils.normalize_text_output(content_ssavr), utils.normalize_text_output(content_cp)
+        return utils.normalize_text_output(content_ssavr), utils.normalize_text_output(content_cp), utils.normalize_text_output(content_af)
 
     def process_site_for_ip(self, site_key, client, ip_address, write_content, display_manager=None):
         # Set immediate status to show parallelism
@@ -207,6 +227,9 @@ class ScannerApp:
             update_status("Skipped", "⏭")
             return True
         if self.args.target == "CP" and site_key != "copypaste":
+            update_status("Skipped", "⏭")
+            return True
+        if self.args.target == "AF" and site_key != "airforshare":
             update_status("Skipped", "⏭")
             return True
 
@@ -237,8 +260,14 @@ class ScannerApp:
         from datetime import datetime as dt_class
         timestamp = dt_class.now().strftime("%Y-%m-%d %H:%M:%S")
         status = "EMPTY" if current_content == "" else ("MINE" if is_mine else "NEW")
+        if site_key == "ssavr":
+            detailed_file = config.SSAVR_DETAILED
+        elif site_key == "airforshare":
+            detailed_file = config.AIRFORSHARE_DETAILED
+        else:
+            detailed_file = config.COPYPASTE_DETAILED
         self.storage.log_to_file(
-            config.SSAVR_DETAILED if site_key == "ssavr" else config.COPYPASTE_DETAILED, 
+            detailed_file, 
             f"[{timestamp}] {ip_address} - {status}: {clean_content}"
         )
 
@@ -249,8 +278,14 @@ class ScannerApp:
             cached = self.storage.clean_cache[site_key].get(ip_address)
             if not cached or utils.clean_text(cached) != clean_content:
                 clean_entry = f"[{timestamp}] {ip_address}\n{clean_content}\n{'-'*80}"
+                if site_key == "ssavr":
+                    clean_file = config.SSAVR_CLEAN
+                elif site_key == "airforshare":
+                    clean_file = config.AIRFORSHARE_CLEAN
+                else:
+                    clean_file = config.COPYPASTE_CLEAN
                 self.storage.log_to_file(
-                    config.SSAVR_CLEAN if site_key == "ssavr" else config.COPYPASTE_CLEAN, 
+                    clean_file, 
                     clean_entry
                 )
                 self.storage.clean_cache[site_key][ip_address] = clean_content
@@ -327,14 +362,14 @@ class ScannerApp:
                     return False
         return True # If no write was performed, or if write was successful
 
-    def process_ip_with_clients(self, ip_address, clients_dict, w_ssavr, w_cp, display_manager, sequential=False):
-        """Processes both sites for a given IP address using the provided clients."""
+    def process_ip_with_clients(self, ip_address, clients_dict, w_ssavr, w_cp, w_af, display_manager, sequential=False):
+        """Processes all sites for a given IP address using the provided clients."""
         # Reset sessions first
         try:
             clients_dict["ssavr"].reset_session()
             clients_dict["copypaste"].reset_session()
+            clients_dict["airforshare"].reset_session()
         except AttributeError:
-            # For proxy session factories, they just create a new session next time they are called
             pass
 
         def local_process_site(site_name, ip_address, write_content, display):
@@ -346,9 +381,10 @@ class ScannerApp:
         if sequential:
             s_ssavr = local_process_site("ssavr", ip_address, w_ssavr, display_manager)
             s_cp = local_process_site("copypaste", ip_address, w_cp, display_manager)
-            return s_ssavr, s_cp
+            s_af = local_process_site("airforshare", ip_address, w_af, display_manager)
+            return s_ssavr, s_cp, s_af
         else:
-            results = {"ssavr": False, "copypaste": False}
+            results = {"ssavr": False, "copypaste": False, "airforshare": False}
             def thread_target(site_name, ip_address, write_content, display):
                 results[site_name] = local_process_site(site_name, ip_address, write_content, display)
                 
@@ -361,15 +397,21 @@ class ScannerApp:
                 target=thread_target, 
                 args=("copypaste", ip_address, w_cp, display_manager)
             )
+            thread_af = threading.Thread(
+                target=thread_target, 
+                args=("airforshare", ip_address, w_af, display_manager)
+            )
             
             thread_ssavr.start()
             thread_cp.start()
+            thread_af.start()
             thread_ssavr.join()
             thread_cp.join()
+            thread_af.join()
             
-            return results["ssavr"], results["copypaste"]
+            return results["ssavr"], results["copypaste"], results["airforshare"]
 
-    def _proxy_worker(self, w_ssavr, w_cp, proxy_manager_display):
+    def _proxy_worker(self, w_ssavr, w_cp, w_af, proxy_manager_display):
         """Worker thread that continuously pulls proxies and processes the sites."""
         while self.running:
             proxy = self.proxy_manager.get_next_proxy()
@@ -389,7 +431,8 @@ class ScannerApp:
 
             proxy_clients = {
                 "ssavr": SsavrClient(proxy_session_factory),
-                "copypaste": CopyPasteClient(proxy_session_factory)
+                "copypaste": CopyPasteClient(proxy_session_factory),
+                "airforshare": AirForShareClient(proxy_session_factory)
             }
             
             try:
@@ -398,16 +441,18 @@ class ScannerApp:
                 
                 display_ip = f"PROXY | {proxy_addr}"
                 
-                ssavr_success, cp_success = self.process_ip_with_clients(display_ip, proxy_clients, w_ssavr, w_cp, proxy_adapter, sequential=True)
+                ssavr_success, cp_success, af_success = self.process_ip_with_clients(display_ip, proxy_clients, w_ssavr, w_cp, w_af, proxy_adapter, sequential=True)
                 
                 # A proxy is successful if it can read/write on AT LEAST ONE site.
-                if ssavr_success or cp_success:
+                if ssavr_success or cp_success or af_success:
                     with proxy_manager_display.lock:
                         proxy_manager_display.proxy_success += 1
                     if ssavr_success:
                         self.stats["ssavr"]["proxy_success"] += 1
                     if cp_success:
                         self.stats["copypaste"]["proxy_success"] += 1
+                    if af_success:
+                        self.stats["airforshare"]["proxy_success"] += 1
                 else:
                     self.proxy_manager.mark_failure(proxy_addr)
                     with proxy_manager_display.lock:
@@ -448,8 +493,9 @@ class ScannerApp:
         if self.args.write: self.storage.add_to_history(self.args.write)
         if self.args.target_ssavr: self.storage.add_to_history(self.args.target_ssavr)
         if self.args.target_copypaste: self.storage.add_to_history(self.args.target_copypaste)
+        if self.args.target_airforshare: self.storage.add_to_history(self.args.target_airforshare)
 
-        w_ssavr, w_cp = self.get_write_contents()
+        w_ssavr, w_cp, w_af = self.get_write_contents()
         loop_iteration = 0
         import threading
         
@@ -471,7 +517,7 @@ class ScannerApp:
             
             self.proxy_executor = ThreadPoolExecutor(max_workers=config.PROXY_THREAD_COUNT)
             for _ in range(config.PROXY_THREAD_COUNT):
-                self.proxy_executor.submit(self._proxy_worker, w_ssavr, w_cp, split_display)
+                self.proxy_executor.submit(self._proxy_worker, w_ssavr, w_cp, w_af, split_display)
         
         split_display.start()
 
@@ -520,11 +566,11 @@ class ScannerApp:
                     if verified:
                         retrying_current = False
                         
-                        ssavr_success, cp_success = self.process_ip_with_clients(ip_address, self.clients, w_ssavr, w_cp, tor_adapter)
+                        ssavr_success, cp_success, af_success = self.process_ip_with_clients(ip_address, self.clients, w_ssavr, w_cp, w_af, tor_adapter)
                         
                         # Track Tor success/fail based on actual returned success flags
                         with split_display.lock:
-                            if ssavr_success or cp_success:
+                            if ssavr_success or cp_success or af_success:
                                 split_display.tor_success += 1
                             else:
                                 split_display.tor_fail += 1
@@ -598,11 +644,13 @@ def main():
     parser.add_argument('-w', '--write', help='Write message to both sites')
     parser.add_argument('-wf', '--write-file', help='Write message from file to both sites')
     
-    parser.add_argument('-t', '--target', choices=['SS', 'CP'], help='Target: SS (ssavr) or CP (copypaste)')
+    parser.add_argument('-t', '--target', choices=['SS', 'CP', 'AF'], help='Target: SS (ssavr), CP (copypaste), or AF (airforshare)')
     parser.add_argument('-ts', '--target-ssavr', help='Write message only to ssavr.com')
     parser.add_argument('-tsf', '--target-ssavr-file', help='Write from file only to ssavr.com')
     parser.add_argument('-tc', '--target-copypaste', help='Write message only to copy-paste.online')
     parser.add_argument('-tcf', '--target-copypaste-file', help='Write from file only to copy-paste.online')
+    parser.add_argument('-ta', '--target-airforshare', help='Write message only to airforshare.com')
+    parser.add_argument('-taf', '--target-airforshare-file', help='Write from file only to airforshare.com')
     
     parser.add_argument('-o', '--overwrite', action='store_true', help='Overwrite own messages')
     parser.add_argument('-a', '--all', action='store_true', help='Overwrite ANY content (⚠️ dangerous!)')
@@ -642,7 +690,7 @@ def main():
                     print(f"   ✓ Removed {item.name}")
         
         # Remove log files in root
-        for f in ["changes.txt", "ssavr_clean.txt", "copypaste_clean.txt"]:
+        for f in ["changes.txt", "ssavr_clean.txt", "copypaste_clean.txt", "airforshare_clean.txt"]:
             p = config.BASE_DIR / f
             if p.exists():
                 p.unlink()
@@ -666,6 +714,7 @@ def main():
     if args.write_file: args.write = load_file_content(args.write_file)
     if args.target_ssavr_file: args.target_ssavr = load_file_content(args.target_ssavr_file)
     if args.target_copypaste_file: args.target_copypaste = load_file_content(args.target_copypaste_file)
+    if args.target_airforshare_file: args.target_airforshare = load_file_content(args.target_airforshare_file)
 
     app = ScannerApp(args)
     app.run()
