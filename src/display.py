@@ -22,6 +22,7 @@ class SplitScreenDisplay:
         self.proxy_fail = 0
         self.tor_success = 0
         self.tor_fail = 0
+        self.new_found = 0
         self.lock = threading.Lock()
         self.live = None
 
@@ -70,14 +71,16 @@ class SplitScreenDisplay:
             Layout(name="proxy", ratio=1),
         )
         # Build Tor title with live stats
-        if self.tor_success or self.tor_fail:
-            tor_title = f"[bold blue]TOR[/bold blue]  [green]✓ {self.tor_success}[/green] [red]✗ {self.tor_fail}[/red]"
+        if self.tor_success or self.tor_fail or self.new_found:
+            new_text = f" [cyan]✨ {self.new_found}[/cyan]" if self.new_found else ""
+            tor_title = f"[bold blue]TOR[/bold blue]  [green]✓ {self.tor_success}[/green] [red]✗ {self.tor_fail}[/red]{new_text}"
         else:
             tor_title = "[bold blue]TOR[/bold blue]"
         layout["tor"].update(Panel(tor_text, title=tor_title, border_style="blue", box=box.ROUNDED, expand=True))
         # Build proxy title with live stats
-        if self.proxy_success or self.proxy_fail:
-            proxy_title = f"[bold yellow]PROXIES[/bold yellow]  [green]✓ {self.proxy_success}[/green] [red]✗ {self.proxy_fail}[/red]"
+        if self.proxy_success or self.proxy_fail or self.new_found:
+            new_text = f" [cyan]✨ {self.new_found}[/cyan]" if self.new_found else ""
+            proxy_title = f"[bold yellow]PROXIES[/bold yellow]  [green]✓ {self.proxy_success}[/green] [red]✗ {self.proxy_fail}[/red]{new_text}"
         else:
             proxy_title = "[bold yellow]PROXIES[/bold yellow]"
         layout["proxy"].update(Panel(proxy_text, title=proxy_title, border_style="yellow", box=box.ROUNDED, expand=True))

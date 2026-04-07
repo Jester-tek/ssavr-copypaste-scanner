@@ -49,9 +49,9 @@ class ScannerApp:
             "airforshare": AirForShareClient(self.tor.get_new_session)
         }
         self.stats = {
-            "ssavr": {"read_fail": 0, "write_fail": 0, "verify_fail": 0, "proxy_success": 0},
-            "copypaste": {"read_fail": 0, "write_fail": 0, "verify_fail": 0, "proxy_success": 0},
-            "airforshare": {"read_fail": 0, "write_fail": 0, "verify_fail": 0, "proxy_success": 0}
+            "ssavr": {"read_fail": 0, "write_fail": 0, "verify_fail": 0, "proxy_success": 0, "new_found": 0},
+            "copypaste": {"read_fail": 0, "write_fail": 0, "verify_fail": 0, "proxy_success": 0, "new_found": 0},
+            "airforshare": {"read_fail": 0, "write_fail": 0, "verify_fail": 0, "proxy_success": 0, "new_found": 0}
         }
         self.ip_skips = 0
         self.proxy_manager = proxy_manager.ProxyManager()
@@ -76,16 +76,19 @@ class ScannerApp:
         print(f"  ❌ Read failures: {self.stats['ssavr']['read_fail']}")
         print(f"  ❌ Write failures: {self.stats['ssavr']['write_fail']}")
         print(f"  ❌ Verify failures: {self.stats['ssavr']['verify_fail']}")
+        print(f"  ✨ Nuovi contenuti salvati: {self.stats['ssavr']['new_found']}")
 
         print(f"\n[copy-paste.online]")
         print(f"  ❌ Read failures: {self.stats['copypaste']['read_fail']}")
         print(f"  ❌ Write failures: {self.stats['copypaste']['write_fail']}")
         print(f"  ❌ Verify failures: {self.stats['copypaste']['verify_fail']}")
+        print(f"  ✨ Nuovi contenuti salvati: {self.stats['copypaste']['new_found']}")
 
         print(f"\n[airforshare.com]")
         print(f"  ❌ Read failures: {self.stats['airforshare']['read_fail']}")
         print(f"  ❌ Write failures: {self.stats['airforshare']['write_fail']}")
         print(f"  ❌ Verify failures: {self.stats['airforshare']['verify_fail']}")
+        print(f"  ✨ Nuovi contenuti salvati: {self.stats['airforshare']['new_found']}")
 
         total_fails = sum(self.stats[s][k] for s in self.stats for k in self.stats[s] if k != 'proxy_success')
         
@@ -115,6 +118,7 @@ class ScannerApp:
             print(f"  ❌ Read failures: {self.stats[key]['read_fail']}")
             print(f"  ❌ Write failures: {self.stats[key]['write_fail']}")
             print(f"  ❌ Verify failures: {self.stats[key]['verify_fail']}")
+            print(f"  ✨ Nuovi contenuti trovati: {self.stats[key]['new_found']}")
         
         total_fails = sum(self.stats['ssavr'].values()) + sum(self.stats['copypaste'].values()) + sum(self.stats['airforshare'].values()) - self.stats['ssavr']['proxy_success'] - self.stats['copypaste']['proxy_success'] - self.stats['airforshare']['proxy_success']
         print(f"\n[Infrastructure]")
@@ -289,6 +293,10 @@ class ScannerApp:
                     clean_entry
                 )
                 self.storage.clean_cache[site_key][ip_address] = clean_content
+                self.stats[site_key]["new_found"] += 1
+                if display_manager and hasattr(display_manager, "split"):
+                    with display_manager.split.lock:
+                        display_manager.split.new_found += 1
 
         # Change detection (Global)
         state_key = f"{ip_address}_{site_name}"
