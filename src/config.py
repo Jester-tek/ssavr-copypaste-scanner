@@ -52,7 +52,8 @@ DEFAULT_CONTROL_PORT = SCANNER_CONTROL_PORT
 
 # Performance / Timeouts
 TOR_CONNECT_TIMEOUT = 25  # Seconds to wait for Tor IP verification
-SITE_READ_TIMEOUT = 15    # Seconds to wait for website
+SITE_READ_TIMEOUT = 6
+SITE_WRITE_TIMEOUT = 10  # Seconds to wait for website
 SITE_RETRY_DELAY = 1      # Seconds between retries
 IP_STABILIZATION_DELAY = 0.5 # Wait before requests after IP change
 
@@ -70,9 +71,13 @@ PROXY_SOURCES = [
     "https://raw.githubusercontent.com/officialputuid/KangProxy/KangProxy/http/http.txt",
     "https://raw.githubusercontent.com/officialputuid/KangProxy/KangProxy/xResults/Proxies.txt",
     "https://raw.githubusercontent.com/vmheaven/VMHeaven-Free-Proxy-Updated/main/all_proxies.txt",
-    "https://api.proxyscrape.com/v2/?request=displayproxies&protocol=socks5",
+    "https://api.proxyscrape.com/v2/?request=displayproxies&protocol=http",
+    "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/socks5.txt",
+    "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/http.txt",
+    "https://raw.githubusercontent.com/hookzof/socks5_list/master/proxy.txt",
+    "https://raw.githubusercontent.com/ShiftyTR/Proxy-List/master/socks5.txt",
 ]
-PROXY_THREAD_COUNT = 60 # Number of concurrent proxy requests
+PROXY_THREAD_COUNT = 500 # Number of concurrent proxy requests
 PROXY_CONNECT_TIMEOUT = 12 # Seconds to wait for a free proxy to connect
 
 def load_config():

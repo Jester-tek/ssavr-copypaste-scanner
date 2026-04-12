@@ -3,9 +3,11 @@
 # Data directory (contains all config, logs, and state)
 data/
 
-# Clean logs (kept in main directory but gitignored)
+# Clean logs and dedup files (kept in main directory but gitignored)
 *_clean.txt
+*_dedup.json
 changes.txt
+messages/
 
 # Python
 __pycache__/
@@ -46,3 +48,4 @@ env/
 Thumbs.db
 altrooo/
 push.sh
+paste_scanner.py

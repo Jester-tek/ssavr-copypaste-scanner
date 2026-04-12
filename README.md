@@ -1,29 +1,28 @@
-everything written here is completely done by AI, even the readme.
+# 🌐 Paste Scanner Suite
 
-# 🌐 Tor & Proxy Clipboard Scanner
+**v7.0.0** - Unified Anonymous Clipboard Monitoring & Brute-Forcing.
 
-**v6.0.0** - Anonymous clipboard monitoring through Tor exit nodes and 16,000+ free proxies with parallel scanning.
-
-Scan ssavr.com and copy-paste.online through Tor and a massive pool of dynamic proxies for maximum anonymity and speed.
+Includes two powerful modules:
+1. **Tor IP Rotation Tool** (`--mod1`): Scans ssavr.com, copy-paste.online, airforshare.com via dedicated Tor exit nodes.
+2. **HTTP Proxy Brute-Forcer** (`--mod2`): Squentially brute-forces URLs on cl1p.net, justpaste.it, and rentry.co using 16,000+ free proxies with parallel scanning (up to 200 workers).
 
 ## ✨ Features
 
-- **Concurrent Proxy Engine**: Dynamically fetches 16,000+ free proxies from 13 sources, running 100 simultaneous threads!
-- **Split-Screen UI**: Beautiful dual-column terminal layout (Tor on left, Proxies on right).
-- **Zero Config**: Automatic dedicated Tor instance (no system Tor modification).
-- **Loop Mode**: Continuous monitoring with intelligent change detection and auto-recovery.
-- **Safe Isolation**: Scanner's Tor never affects other Tor apps (Simplex, etc.).
+- **Blazing Fast Analytics**: Uses C-compiled extensions (`fast_utils.c`) to bypass Python's GIL. Runs regex & language detection thousands of times faster.
+- **Smart Dedup & V2 Tracking**: The Proxy Brute-Forcer saves everything in RAM, deduplicates natively, and tracks message revisions on the same URL (e.g., marks as V2, V3 if the text changes over time).
+- **Concurrent Proxy Engine**: Dynamically fetches proxies from 13 sources.
+- **Zero Config**: Automatic Tor instances and automated GCC dependency compiling for the C extensions.
 
 ## 🚀 Quick Start (Automated Install)
 
-We provide a seamless setup script that installs Tor and sets up a Python virtual environment automatically:
+Simply run the app. If the C-extensions haven't been compiled yet, it will automatically detect it and compile them on the fly. 
 
 ```bash
 # 1. Download the code
-git clone https://github.com/your-repo/ssavr-copypaste-scanner.git
+git clone https://github.com/Jester-tek/ssavr-copypaste-scanner.git
 cd ssavr-copypaste-scanner
 
-# 2. Run the automated installer
+# 2. Run the automated installer for Python dependencies & Tor
 chmod +x setup.sh
 ./setup.sh
 
@@ -32,88 +31,60 @@ source venv/bin/activate
 python3 main.py
 ```
 
-**That's it!** The scanner starts its own Tor instance automatically on port 9060. Your system Tor (port 9050) is never touched.
+*Note: If you run `main.py` directly without `setup.sh`, ensure `gcc` and `python3-pip` are already installed.*
 
 ## 📖 Usage
 
+**You MUST supply a mandatory flag to select the tool:**
+
+### Tool 1: Tor Scanner (`--mod1`)
+
 ```bash
 # Basic
-python3 main.py                         # Read-only scan
-python3 main.py -s 139                  # Scan only IP #139
-python3 main.py -l                      # Loop mode (monitor changes)
+python3 main.py --mod1                  # Read-only loop across all Tor sites
+python3 main.py --mod1 -s 139           # Scan only Tor IP #139
+python3 main.py --mod1 -l               # Loop mode
 
 # Writing
-python3 main.py -w "Hello"              # Write to both sites
-python3 main.py -wf msg.txt             # Write from file
-python3 main.py -ts "Hi SS" -tc "Hi CP" # Different per site
-python3 main.py -l -w "Hi"              # Loop + Write combined
-
-# Advanced
-python3 main.py -w "Test" -o            # Overwrite own messages
-python3 main.py -w "Test" -a            # Overwrite EVERYTHING (⚠️)
-python3 main.py -i 100                  # Start from IP #100
-python3 main.py -b                      # Randomize order
-python3 main.py -u                      # Check for updates
-
-# Maintenance
-python3 main.py --clean-data            # Remove all generated data
-python3 main.py --uninstall             # Clean + show uninstall steps
+python3 main.py --mod1 -wf msg.txt      # Write from file
+python3 main.py --mod1 -tsf msgSS.txt -tcf msgCP.txt # Different files per site
 ```
 
-## 📁 Files
+### Tool 2: Proxy Brute-Forcer (`--mod2`)
 
-All data stays inside the project folder:
+```bash
+# Basic
+python3 main.py --mod2 -t cl1p          # Fast scan cl1p.net
+python3 main.py --mod2 -t all           # Scan cl1p, rentry, justpaste simultaneously!
+
+# Writing (cl1p only)
+python3 main.py --mod2 -t cl1p -wf msg.txt           # Write from file
+python3 main.py --mod2 -t all -tcf msgCL1P.txt       # Scan all, but write only to cl1p
+
+# Advanced
+python3 main.py --mod2 -t all --reset-all # ⚠️ CAUTION: Deletes all states/dedup hashes
+```
+
+## 📁 Files Generated
 
 ```
 📂 ssavr-copypaste-scanner/
-├── ssavr_clean.txt          # New content (no duplicates)
-├── copypaste_clean.txt      # New content (no duplicates)
-├── changes.txt              # Changes detected in any mode
-└── 📂 data/
-    ├── scanner_tor/         # Dedicated Tor instance data
-    ├── ssavr_detailed.txt   # All reads
-    ├── copypaste_detailed.txt
-    ├── current_*.txt        # Current state per IP
-    ├── inputs_history.json  # Your message history
-    └── debug.log
+├── cl1p_clean.txt           # Proxy module output
+├── rentry_clean.txt
+├── justpaste_clean.txt
+├── ssavr_clean.txt          # Tor module output
+├── copypaste_clean.txt
+├── airforshare_clean.txt
+└── 📂 data/                 # Auto-maintained states and history
 ```
-
-## 🔧 Options
-
-| Option | Description |
-|--------|-------------|
-| `-w TEXT` | Write to both sites |
-| `-wf FILE` | Write from file |
-| `-ts/-tc` | Write to specific site |
-| `-o` | Overwrite own messages |
-| `-a` | Overwrite ANY content (⚠️) |
-| `-s NUM` | Scan only one IP |
-| `-i NUM` | Start from IP number |
-| `-l` | Loop mode (monitor changes) |
-| `-b` | Randomize IP order |
-| `-u` | Check for updates |
-| `--clean-data` | Remove all generated data |
-| `--uninstall` | Full cleanup |
-
-## 🔒 Privacy & Safety
-
-- **Dedicated Tor**: Scanner runs its OWN Tor instance (port 9060)
-- **System Tor Untouched**: Your other apps (Simplex, browser) use port 9050 normally
-- **No Conflicts**: ExitNodes settings only affect scanner's Tor
-- **Auto Cleanup**: Scanner's Tor shuts down when script exits
-- **All Local**: No external data collection
 
 ## 🗑️ Uninstall
 
 ```bash
-python3 main.py --uninstall
-rm -rf /path/to/ssavr-copypaste-scanner
+python3 main.py --mod1 --uninstall
+rm -rf ssavr-copypaste-scanner
 ```
 
 ## 📝 Changelog
 
 See [CHANGELOG.md](CHANGELOG.md)
-
----
-
-**v6.0.0** | MIT License

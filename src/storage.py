@@ -1,7 +1,20 @@
+import ctypes
+from pathlib import Path
+import hashlib
+
+try:
+    _fast = ctypes.CDLL(str(Path(__file__).parent / "fast_utils.so"))
+    _fast.fast_hash_content.argtypes = [ctypes.c_char_p]
+    _fast.fast_hash_content.restype = ctypes.c_uint64
+    _ext_loaded = True
+except Exception:
+    _ext_loaded = False
+
 import json
 import logging
-from pathlib import Path
 from datetime import datetime
+import time
+import threading
 from . import config, utils
 
 class StorageManager:
@@ -9,7 +22,13 @@ class StorageManager:
         self.history = self._load_history()
         self.current_state = self._load_current_state()
         self.clean_cache = {"ssavr": {}, "copypaste": {}, "airforshare": {}}
+        self.clean_hashes = {"ssavr": set(), "copypaste": set(), "airforshare": set()}
         self._load_clean_cache()
+        
+        # UI/File I/O optimizations
+        self.view_files_cache = {"ssavr": {}, "airforshare": {}, "copypaste": {}}
+        self.last_view_flush = time.time()
+        self.view_lock = threading.Lock()
 
     def _load_history(self):
         if config.HISTORY_FILE.exists():
@@ -51,6 +70,18 @@ class StorageManager:
         with open(config.CURRENT_STATE_FILE, 'w', encoding='utf-8') as f:
             json.dump(self.current_state, f, indent=2, ensure_ascii=False)
 
+    def _fast_hash(self, content):
+        if _ext_loaded:
+            return _fast.fast_hash_content(content.encode("utf-8", errors="ignore"))
+        h = hashlib.sha256(content.strip().lower().encode("utf-8")).hexdigest()
+        return h
+
+    def is_global_duplicate(self, site_key, content):
+        return self._fast_hash(content) in self.clean_hashes[site_key]
+
+    def add_global_hash(self, site_key, content):
+        self.clean_hashes[site_key].add(self._fast_hash(content))
+
     def _load_clean_cache(self):
         self._load_cache_file(config.SSAVR_CLEAN, "ssavr")
         self._load_cache_file(config.COPYPASTE_CLEAN, "copypaste")
@@ -62,14 +93,28 @@ class StorageManager:
             try:
                 with open(filepath, 'r', encoding='utf-8') as f:
                     current_ip = None
+                    content_block = []
                     for line in f:
                         if line.startswith('['):
+                            # Salva blocco precedente
+                            if current_ip and content_block:
+                                full_content = '\n'.join(content_block)
+                                self.clean_cache[key][current_ip] = full_content
+                                self.clean_hashes[key].add(self._fast_hash(full_content))
                             ip = utils.extract_ip_from_text(line)
                             if ip:
                                 current_ip = ip
-                        elif current_ip and line.strip() and not line.startswith('-'):
-                            self.clean_cache[key][current_ip] = line.strip()
-                            current_ip = None
+                                content_block = []
+                        elif current_ip and not line.startswith('-'*80) and not line.startswith('-'*70):
+                            if line.strip() != "":
+                                content_block.append(line.strip())
+                    
+                    # Salva ultimo blocco
+                    if current_ip and content_block:
+                        full_content = '\n'.join(content_block)
+                        self.clean_cache[key][current_ip] = full_content
+                        self.clean_hashes[key].add(self._fast_hash(full_content))
+                        
             except Exception as e:
                 utils.debug_log(f"Error loading {key} clean cache: {e}")
 
@@ -80,85 +125,45 @@ class StorageManager:
         path.parent.mkdir(exist_ok=True, parents=True)
         with open(path, mode, encoding='utf-8') as f:
             f.write(content + '\n')
-
     def update_current_view_file(self, site_name, ip_address, content):
-        """
-        Updates the human-readable 'current_*.txt' files.
-        Re-implements logic to preserve multi-line content for other IPs.
-        """
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         if "ssavr" in site_name:
-            filename = config.CURRENT_SSAVR
+            key = "ssavr"
         elif "airforshare" in site_name:
-            filename = config.CURRENT_AIRFORSHARE
+            key = "airforshare"
         else:
-            filename = config.CURRENT_COPYPASTE
-        
-        current_data = {}
-        
-        # Parse existing
-        if filename.exists():
+            key = "copypaste"
+            
+        with self.view_lock:
+            display_content = content if content else "(empty)"
+            self.view_files_cache[key][ip_address] = {
+                "timestamp": timestamp,
+                "content": display_content
+            }
+            now = time.time()
+            if now - self.last_view_flush > 5:
+                self.last_view_flush = now
+                threading.Thread(target=self._flush_view_files_safe, daemon=True).start()
+
+    def _flush_view_files_safe(self):
+        with self.view_lock:
+            snapshot = {k: dict(v) for k, v in self.view_files_cache.items()}
+            
+        for key, filename in [("ssavr", config.CURRENT_SSAVR), ("airforshare", config.CURRENT_AIRFORSHARE), ("copypaste", config.CURRENT_COPYPASTE)]:
+            if not snapshot[key]: continue
             try:
-                with open(filename, 'r', encoding='utf-8') as f:
-                    current_ip = None
-                    reading_content = False
-                    content_lines = []
-                    
-                    for line in f:
-                        if line.startswith("[IP:"):
-                            if current_ip and reading_content:
-                                current_data[current_ip]["content"] = '\n'.join(content_lines).strip()
-                                reading_content = False
-                                content_lines = []
-                            
-                            current_ip = utils.extract_ip_from_text(line)
-                            if current_ip and current_ip not in current_data:
-                                current_data[current_ip] = {"timestamp": "", "content": ""}
-                        
-                        elif current_ip and "Last updated:" in line:
-                            ts = line.split("Last updated:")[1].strip()
-                            current_data[current_ip]["timestamp"] = ts
-                        
-                        elif current_ip and line.strip().startswith("Content:"):
-                            cont = line.split("Content:", 1)[1].strip()
-                            content_lines = [cont] if cont else []
-                            reading_content = True
-                        
-                        elif current_ip and reading_content and not line.startswith("-"):
-                            if line.strip():
-                                content_lines.append(line.rstrip())
-                        
-                        elif line.startswith("-"):
-                            if current_ip and reading_content:
-                                current_data[current_ip]["content"] = '\n'.join(content_lines).strip()
-                                reading_content = False
-                                content_lines = []
-                    
-                    if current_ip and reading_content:
-                        current_data[current_ip]["content"] = '\n'.join(content_lines).strip()
-
+                if len(self.view_files_cache[key]) > 20000: pass
+                timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                with open(filename, 'w', encoding='utf-8') as f:
+                    f.write(f"# Current state of {key}\n")
+                    f.write(f"# Last updated: {timestamp}\n")
+                    f.write(f"# Total IPs tracked: {len(snapshot[key])}\n")
+                    f.write("="*80 + "\n\n")
+                    for ip in sorted(snapshot[key].keys()):
+                        data = snapshot[key][ip]
+                        f.write(f"[IP: {ip}]\n")
+                        f.write(f"  Last updated: {data['timestamp']}\n")
+                        f.write(f"  Content: {data['content']}\n")
+                        f.write("-" * 80 + "\n")
             except Exception as e:
-                utils.debug_log(f"Error reading view file {filename}: {e}")
-
-        # Update target IP
-        current_data[ip_address] = {
-            "timestamp": timestamp,
-            "content": content if content else "(empty)"
-        }
-
-        # Write back
-        try:
-            with open(filename, 'w', encoding='utf-8') as f:
-                f.write(f"# Current state of {site_name}\n")
-                f.write(f"# Last updated: {timestamp}\n")
-                f.write(f"# Total IPs tracked: {len(current_data)}\n")
-                f.write("="*80 + "\n\n")
-                for ip in sorted(current_data.keys()):
-                    data = current_data[ip]
-                    f.write(f"[IP: {ip}]\n")
-                    f.write(f"  Last updated: {data['timestamp']}\n")
-                    f.write(f"  Content: {data['content']}\n")
-                    f.write("-"*80 + "\n\n")
-        except Exception as e:
-            utils.debug_log(f"Error writing view file {filename}: {e}")
-
+                utils.debug_log(f"Error flushing view file {filename}: {e}")

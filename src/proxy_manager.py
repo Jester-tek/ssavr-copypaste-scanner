@@ -2,12 +2,17 @@ import re
 import requests
 import random
 import time
+import threading
 from . import config, utils
 
 class ProxyManager:
     def __init__(self):
         self.sources = config.PROXY_SOURCES
-        self.proxies = [] # List of dicts: {'address': 'ip:port', 'protocol': 'http'|'socks4'|'socks5', 'fails': 0}
+        self.proxies_list = [] # List of dicts
+        self.proxies_dict = {} # Keyed by address
+        self.lock = threading.Lock()
+        self._refresh_running = False
+        self._refresh_thread = None
         
     def fetch_proxies(self, randomize=False):
         """Fetches free proxies from multiple sources."""
@@ -42,13 +47,45 @@ class ProxyManager:
             except Exception as e:
                 print(f"  ✗ {source.split('/')[-1][:20]}: Failed ({type(e).__name__})")
                 
-        # Populate our list
-        self.proxies = [{'address': p[0], 'protocol': p[1], 'fails': 0} for p in raw_proxies]
-        print(f"=> Total unique proxies loaded: {len(self.proxies)}")
+        with self.lock:
+            # Merge logic for infinite loop background fetch
+            added = 0
+            for addr, proto in raw_proxies:
+                if addr not in self.proxies_dict:
+                    new_p = {'address': addr, 'protocol': proto, 'fails': 0}
+                    self.proxies_list.append(new_p)
+                    self.proxies_dict[addr] = new_p
+                    added += 1
+                else:
+                    # Give existing ones a second chance by decreasing fail count slightly
+                    self.proxies_dict[addr]['fails'] = max(0, self.proxies_dict[addr]['fails'] - 1)
+            
+            # Auto-purge proxies with >25 fails to keep memory clean during days of run
+            alive_proxies = [p for p in self.proxies_list if p['fails'] < 25]
+            if len(alive_proxies) < len(self.proxies_list):
+                self.proxies_list = alive_proxies
+                self.proxies_dict = {p['address']: p for p in self.proxies_list}
+            
+            print(f"=> Total active proxies in pool: {len(self.proxies_list)} (+{added} fresh)")
+            
+            if randomize:
+                random.shuffle(self.proxies_list)
+
+    def start_auto_refresh(self, interval_mins=45):
+        """Spawns a background thread to fetch new proxies indefinitely."""
+        if self._refresh_running:
+            return
+        self._refresh_running = True
+        self._refresh_thread = threading.Thread(target=self._auto_refresh_loop, args=(interval_mins,), daemon=True)
+        self._refresh_thread.start()
         
-        # Shuffle if requested
-        if randomize:
-            random.shuffle(self.proxies)
+    def _auto_refresh_loop(self, interval_mins):
+        while self._refresh_running:
+            for _ in range(interval_mins * 60):
+                if not self._refresh_running: return
+                time.sleep(1)
+            print("\n🔄 [AUTO-TASK] Fetching fresh proxies in background...")
+            self.fetch_proxies(randomize=True)
         
     def _guess_protocol_from_url(self, source_url):
         """Guess protocol based on URL string"""
@@ -58,21 +95,21 @@ class ProxyManager:
         return 'http'
         
     def get_next_proxy(self):
-        """Returns a proxy dict, preferring ones with fewer failures."""
-        if not self.proxies:
-            return None
+        """Returns a proxy dict, picking the best out of a random sample (O(1) instead of O(N log N))."""
+        with self.lock:
+            if not self.proxies_list:
+                return None
+                
+            # Pick a random sample and return the one with least fails
+            sample_size = min(20, len(self.proxies_list))
+            candidates = random.sample(self.proxies_list, sample_size)
+            return min(candidates, key=lambda x: x['fails'])
             
-        # Sort by fails, pick one of the best 50 randomly to ensure distribution
-        sorted_proxies = sorted(self.proxies, key=lambda x: x['fails'])
-        pool_size = min(50, len(sorted_proxies))
-        return random.choice(sorted_proxies[:pool_size])
-        
     def mark_failure(self, proxy_address):
-        """Increments the failure count for a proxy. If it fails too much, we could remove it."""
-        for p in self.proxies:
-            if p['address'] == proxy_address:
-                p['fails'] += 1
-                break
+        """Increments the failure count for a proxy in O(1) time."""
+        with self.lock:
+            if proxy_address in self.proxies_dict:
+                self.proxies_dict[proxy_address]['fails'] += 1
                 
     def get_requests_dict(self, proxy):
         """Converts our proxy dict into a format requests.get(proxies=...) understands"""

@@ -1,6 +1,23 @@
 # Changelog
 
-All notable changes to Tor Clipboard Scanner.
+All notable changes to the Paste Scanner Suite.
+
+## [7.0.0] - 2026-04-12
+
+### 🔥 Major Architectural Re-design
+- **Unified Main Gateway**: The application is no longer a collection of loosely coupled scripts. All execution goes through `main.py` using mandatory `--mod1` or `--mod2` CLI flags to enforce architectural purity.
+- **C-Level Extension Auto-Compilation**: To support Linux users out-of-the-box, running `main.py` now automatically detects if the `fast_utils` C library needs to be compiled. It verifies `gcc` and generates `fast_utils.so` on the fly. No manual makefiles needed!
+
+### ✨ New Features
+- **V2 Revision Tracking Capability (`--mod2`)**: The `proxy_scanner` now tracks content hashes of every URL. If an existing message changes under your nose in successive scans, it natively maps it as V2, V3 etc.
+- **Deduplication Engine**: Global real-time duplicate skipping logic via memory map.
+- **Mass Control Flag**: Added `--reset-all` to clear all dedup traces and history.
+
+### 🧹 Cleanup 
+- Fully scrubbed all Italian remnants from terminal output, help files, and logging syntax. The entire application is now localized purely to English.
+- Eliminated terminal UI conflicts from argparse overrides.
+
+---
 
 ## [6.0.4] - 2026-02-26
 
@@ -15,13 +32,6 @@ All notable changes to Tor Clipboard Scanner.
 - **Counter Bug**: `ProxyDisplayAdapter` was incrementing the global proxy counter on every log line instead of once per proxy — now correctly incremented at adapter creation time
 - **Duplicate IP in Log**: Log lines no longer show the IP address twice (it's in the column header — no need to repeat it in every line)
 - **rich.Live Assertion**: Fixed `AssertionError: refresh_per_second must be > 0` when starting the live display
-
-### 📖 Upgrade Guide
-```bash
-git pull
-source venv/bin/activate  # if using venv
-python3 main.py -l -b
-```
 
 ## [5.7.1] - 2026-02-05
 
@@ -120,208 +130,3 @@ Critical bug fixes and new file loading feature.
 ### Changed
 - Help text simplified and reorganized
 - Version bumped to 5.0.0 for major fixes
-
-## [4.0.0] - 2024-12-22
-
-### 🎉 Major Release - Enhanced Reliability & Deduplication
-
-### Added
-- **Retry Logic with Auto-Recovery**: Automatic 2 retries (3 total attempts) when encountering empty results
-- **Smart Clean File Deduplication**: Tracks IP + content combinations to avoid duplicate logging
-- **Enhanced Documentation**: Complete English documentation for public GitHub release
-
-### Changed
-- **All User-Facing Text to English**: Complete internationalization
-- **Improved Clean File Logic**: Both clean files only log truly new content from others
-- **Better Empty Detection**: Multiple retries before declaring field empty
-
-### Fixed
-- **copypaste_clean.txt Not Generating**: Fixed bug where file wasn't being created
-- **False Positives in Changes File**: Retry logic prevents spurious changes
-- **Duplicate Clean Entries**: Same content from same IP no longer logged multiple times
-
-## [3.0.0] - 2024-12-20
-
-### Added
-- Secure password management with getpass
-- Configuration file for settings
-- Update checker with git integration
-- Current state files for real-time IP tracking
-- Statistics tracking for failures
-
-## [2.0.0] - 2024-12-15
-
-### Added
-- Loop mode for continuous monitoring
-- Change detection and logging
-- Randomize IP order option
-- Single IP scan mode
-- Target-specific writing (-t, -ts, -tc options)
-
-## [1.0.0] - 2024-12-10
-
-### Added
-- Initial release
-- Basic scanning through Tor
-- Read/write for both sites
-
----
-
-## Upgrade Guide
-
-### From 4.x to 5.0
-
-**IMPORTANT**: Delete old current_*.txt files to start fresh with fixed format.
-
-```bash
-rm data/current_ssavr.txt data/current_copypaste.txt
-git pull origin main
-python3 scanner.py
-```
-
-Your configuration and logs are preserved.
-
-### From 3.x to 4.0
-
-No breaking changes - simply update:
-```bash
-git pull origin main
-python3 scanner.py
-```
-
----
-
-**Note**: Version numbers follow [Semantic Versioning](https://semver.org/).
-
-### 🎉 Major Release - Enhanced Reliability & Deduplication
-
-This release focuses on eliminating false positives and preventing duplicate logging.
-
-### Added
-- **Retry Logic with Auto-Recovery**: Automatic 2 retries (3 total attempts) when encountering empty results
-  - 2-second delay between retries to allow connection stabilization
-  - Visual feedback: `(empty, retry 1/2)... (empty, retry 2/2)...`
-  - Applies to both ssavr.com and copy-paste.online
-  - Significantly reduces false empty results from connection issues
-- **Smart Clean File Deduplication**: 
-  - Loads existing clean file content at startup into memory cache
-  - Tracks IP + content combinations to avoid duplicate logging
-  - Only logs new content or same content on different IPs
-  - Shows `💾 Already logged in clean file, skipping` when skipping duplicates
-- **Enhanced Documentation**: Complete English documentation for public GitHub release
-  - Detailed README with all features and examples
-  - Clear explanation of quote requirements in command arguments
-  - Comprehensive troubleshooting guide
-
-### Changed
-- **All User-Facing Text to English**: Complete internationalization for wider audience
-  - Console output, error messages, help text
-  - Status messages and progress indicators
-  - All documentation and examples
-- **Improved Clean File Logic**: 
-  - `copypaste_clean.txt` now fully functional and working correctly
-  - Both clean files only log truly new content from others
-  - Better filtering of own messages vs external content
-- **Better Empty Detection**: 
-  - Multiple retries before declaring field empty
-  - Reduces false change detections in loop mode
-  - More reliable state tracking
-
-### Fixed
-- **copypaste_clean.txt Not Generating**: Fixed bug where copy-paste clean file wasn't being created
-- **False Positives in Changes File**: Retry logic prevents spurious empty↔content changes
-- **Duplicate Clean Entries**: Same content from same IP no longer logged multiple times
-- **Connection Timeout False Empties**: Retry system handles temporary network issues
-
-### Technical Improvements
-- Optimized cache loading from existing clean files
-- Better IP extraction from various text formats
-- Enhanced error handling in read operations
-- Improved text normalization and comparison
-
-## [3.0.0] - 2024-12-20
-
-### Added
-- Secure password management with getpass
-- Configuration file for storing settings
-- Update checker with git integration
-- Current state files for real-time IP tracking
-- Advanced text processing features (can be disabled)
-- Statistics tracking for failures
-- Debug logging system
-
-### Changed
-- Reorganized file structure (data/ directory)
-- Improved error messages and user feedback
-- Better IP verification system
-- Enhanced session management
-
-### Fixed
-- IP verification reliability
-- Session cookie handling
-- Rate limiting issues with copy-paste.online
-
-## [2.0.0] - 2024-12-15
-
-### Added
-- Loop mode for continuous monitoring
-- Change detection and logging
-- Randomize IP order option
-- Single IP scan mode
-- Message history management
-- Target-specific writing (-t, -ts, -tc options)
-
-### Changed
-- Complete rewrite of scanning logic
-- Improved Tor integration
-- Better exit node selection
-
-## [1.0.0] - 2024-12-10
-
-### Added
-- Initial release
-- Basic scanning through Tor exit nodes
-- Read and write functionality for both sites
-- Simple logging system
-- History tracking
-
----
-
-## Upgrade Guide
-
-### From 3.x to 4.0
-
-No breaking changes. Simply update and run:
-
-```bash
-git pull origin main
-python3 scanner.py
-```
-
-Your existing:
-- Configuration files will work unchanged
-- Message history will be preserved  
-- Log files will continue to append
-- Clean files will be loaded into cache automatically
-
-New features are automatic - just enjoy improved reliability!
-
-### From 2.x to 3.0
-
-- Password will be requested on first run (saved to config if desired)
-- Files reorganized into `data/` directory - old logs can be moved manually
-- New `data/.tor_scanner_config.json` stores settings
-
-### From 1.x to 2.0
-
-Major rewrite - recommend fresh install:
-
-```bash
-git pull origin main
-rm -rf *.txt *.json  # Backup first if needed
-python3 scanner.py
-```
-
----
-
-**Note**: Dates are in YYYY-MM-DD format. Version numbers follow [Semantic Versioning](https://semver.org/).
