@@ -634,7 +634,7 @@ class PasteScanner:
                         continue
                     else:
                         if result.get("status") != "hit+write":
-                            result["status"] = "error"
+                            result["status"] = "error_write"
                 else:
                     if result.get("status") != "hit+write":
                         result["status"] = "error"
@@ -822,7 +822,7 @@ class PasteScanner:
                             
                         with self.stats_lock:
                             self.stats["checked"] += 1
-                            if r["status"] == "hit" or r["status"] == "hit+write":
+                            if r["status"] in ["hit", "hit+write"]:
                                 self.stats["hits"] += 1
                                 self._print_hit(r["url"], r.get("content_len", 0),
                                                 content=r.get("content", ""),
@@ -834,22 +834,24 @@ class PasteScanner:
                                                 content=r.get("content", ""),
                                                 is_revision=True)
                             elif r["status"] == "wrote":
-                                self.stats["hits"] += 1
+                                self.stats["empty"] += 1
                                 self._print_wrote(r["url"])
-                            elif r["status"] == "duplicate":
+                            elif r["status"] == "empty":
+                                self.stats["empty"] += 1
+                            elif r["status"] in ["duplicate", "occupied"]:
                                 self.stats["duplicates"] += 1
                             elif r["status"] == "foreign":
                                 self.stats["foreign_skipped"] += 1
-                            elif r["status"] == "error":
-                                self.stats["errors"] += 1
-                            elif r["status"] == "rate_limit":
-                                pass
                             elif r["status"] == "mine":
                                 self.stats["skipped_mine"] += 1
-                            elif r["status"] == "occupied":
-                                pass
-                            else:
+                            elif r["status"] == "error":
+                                self.stats["errors"] += 1
+                            elif r["status"] == "error_write":
                                 self.stats["empty"] += 1
+                            elif r["status"] == "rate_limit":
+                                self.stats["errors"] += 1
+                            else:
+                                self.stats["errors"] += 1
                 finally:
                     if not self.running:
                         try:
