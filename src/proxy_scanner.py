@@ -626,10 +626,18 @@ class PasteScanner:
                 if self.target in ["cl1p", "rentry"]:
                     wrote = client.write(url_str, self.write_msg)
                     if wrote is True:
-                        with self.stats_lock:
-                            self.stats["wrote"] += 1
-                        if result.get("status") != "hit+write":
-                            result["status"] = "wrote"
+                        # Verify write by re-reading
+                        import time as _t
+                        _t.sleep(0.3)
+                        verify = client.read(url_str)
+                        if verify and self.write_msg[:30] in verify:
+                            with self.stats_lock:
+                                self.stats["wrote"] += 1
+                            if result.get("status") != "hit+write":
+                                result["status"] = "wrote"
+                        else:
+                            if result.get("status") != "hit+write":
+                                result["status"] = "wrote_fake"
                     elif wrote is None:
                         continue
                     else:
@@ -731,12 +739,15 @@ class PasteScanner:
                 print(f"     | ... [{len(lines)-40} more lines omitted, see .txt file]")
             print()
 
-    def _print_wrote(self, url_str):
+    def _print_wrote(self, url_str, verified=True):
         """Print to screen when a message is successfully written."""
         if not self.quiet_ui:
             sys.stdout.write(f"\r{' '*100}\r")
         clean_url = f"{self.site_url.replace('https://', '')}/{url_str}"
-        print(f"  ✍️  WROTE! {clean_url}")
+        if verified:
+            print(f"  ✅ WROTE+VERIFIED! {clean_url}")
+        else:
+            print(f"  ⚠️  WROTE but NOT verified {clean_url}")
         print()
 
     def _print_rate_limit_warning(self):
@@ -835,7 +846,11 @@ class PasteScanner:
                                                 is_revision=True)
                             elif r["status"] == "wrote":
                                 self.stats["empty"] += 1
-                                self._print_wrote(r["url"])
+                                self._print_wrote(r["url"], verified=True)
+                            elif r["status"] == "wrote_fake":
+                                self.stats["empty"] += 1
+                                self.stats["wrote_fake"] += 1
+                                self._print_wrote(r["url"], verified=False)
                             elif r["status"] == "empty":
                                 self.stats["empty"] += 1
                             elif r["status"] in ["duplicate", "occupied"]:
@@ -935,6 +950,7 @@ class PasteScanner:
             table.add_column("Written OK", justify="center", style="yellow")
             table.add_column("Empty/404", justify="center", style="dim white")
             table.add_column("Skipped", justify="center", style="dim yellow")
+            table.add_column("Errors", justify="center", style="red")
             for tgt in ["cl1p", "justpaste", "rentry"]:
                 s = live_stats[tgt]
                 status = "🟡" if procs[tgt].poll() is None else "🪦"
