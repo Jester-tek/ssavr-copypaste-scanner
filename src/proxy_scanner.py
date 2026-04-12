@@ -899,14 +899,14 @@ class PasteScanner:
         
         live_stats = {
             "cl1p": {"checked": 0, "hits": 0, "wrote": 0, "errors": 0},
-            "justpaste (READ-ONLY)": {"checked": 0, "hits": 0, "wrote": 0, "errors": 0},
+            "justpaste": {"checked": 0, "hits": 0, "wrote": 0, "errors": 0},
             "rentry": {"checked": 0, "hits": 0, "wrote": 0, "errors": 0}
         }
         
         procs = {}
-        for tgt in ["cl1p", "justpaste (READ-ONLY)", "rentry"]:
+        for tgt in ["cl1p", "justpaste", "rentry"]:
             tgt_mode = self.mode
-            if tgt == "justpaste (READ-ONLY)":
+            if tgt == "justpaste":
                 tgt_mode = "read"
 
             cmd = [sys.executable, "-u", sys.argv[0], "--mod2", "-t", tgt, "--quiet-ui"]
