@@ -799,6 +799,11 @@ class PasteScanner:
 
                 batch = list(range(self.current_idx, self.current_idx + self.workers))
 
+                # Periodically emit stats for supervisor
+                if getattr(self.args, 'quiet_ui', False):
+                    with self.stats_lock:
+                        print(f"@@STATS@@{json.dumps(self.stats)}", flush=True)
+
                 executor = ThreadPoolExecutor(max_workers=self.workers)
                 futures = {executor.submit(self._process_url, idx): idx for idx in batch}
                 
@@ -873,16 +878,25 @@ class PasteScanner:
             print("  💾 State saved. Restart to continue where you left off.\n")
 
     def _run_all_supervisor(self):
-        import subprocess
+        """Run all sites concurrently using subprocesses and rich.Live UI."""
         print("\n  🚀 MULTI-SITE LAUNCH: cl1p, justpaste, rentry")
         print("  ===============================================================")
-        print("  Status bar disabled to avoid graphical artifacts.")
-        print("  Hits from all sites will appear below in real-time.\n")
+        print("  Scanning all targets. Hits from all sites will appear below in real-time.\n")
         
-        procs = []
+        from rich.live import Live
+        from rich.table import Table
+        import select
+        import subprocess
+        import os
+        
+        live_stats = {
+            "cl1p": {"checked": 0, "hits": 0, "wrote": 0, "errors": 0},
+            "justpaste": {"checked": 0, "hits": 0, "wrote": 0, "errors": 0},
+            "rentry": {"checked": 0, "hits": 0, "wrote": 0, "errors": 0}
+        }
+        
+        procs = {}
         for tgt in ["cl1p", "justpaste", "rentry"]:
-            # Justpaste does not support write mode.
-            # If the user launched 'all' in write mode, force justpaste to read mode.
             tgt_mode = self.mode
             if tgt == "justpaste":
                 tgt_mode = "read"
@@ -891,7 +905,6 @@ class PasteScanner:
             if getattr(self.args, 'reset', False): cmd.append("--reset")
             if getattr(self.args, 'start', ''): cmd.extend(["--start", self.args.start])
 
-            # Only pass write arguments if this specific target supports writing (cl1p, rentry)
             if tgt_mode == "write":
                 if tgt == "cl1p":
                     if getattr(self.args, 'target_cl1p_file', None): cmd.extend(["-tcf", self.args.target_cl1p_file])
@@ -904,15 +917,79 @@ class PasteScanner:
                     elif getattr(self.args, 'write_file', None): cmd.extend(["-wf", self.args.write_file])
                     elif getattr(self.args, 'write', None): cmd.extend(["-w", self.args.write])
                 
-            procs.append(subprocess.Popen(cmd))
+            procs[tgt] = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+
+        def generate_table():
+            table = Table(title="Live Scanner Performance", style="cyan")
+            table.add_column("Site", justify="right", style="cyan", no_wrap=True)
+            table.add_column("URLs Scanned", justify="center", style="magenta")
+            table.add_column("Saved / Hits", justify="center", style="green")
+            table.add_column("Written OK", justify="center", style="yellow")
+            table.add_column("Errors/Fails", justify="center", style="red")
             
-        try:
-            for p in procs:
-                p.wait()
-        except KeyboardInterrupt:
-            for p in procs:
-                p.terminate()
-            print("\n  🛑 Shutting down supervisor...")
+            for tgt in ["cl1p", "justpaste", "rentry"]:
+                s = live_stats[tgt]
+                status = "🟡" if procs[tgt].poll() is None else "🪦"
+                table.add_row(
+                    f"{tgt} {status}",
+                    str(s["checked"]),
+                    str(s["hits"]),
+                    str(s["wrote"]),
+                    str(s["errors"])
+                )
+            return table
+
+        with Live(generate_table(), refresh_per_second=4, screen=False) as live:
+            poller = select.epoll()
+            fd_to_tgt = {}
+            for tgt, p in procs.items():
+                fd = p.stdout.fileno()
+                poller.register(fd, select.EPOLLIN)
+                fd_to_tgt[fd] = (tgt, p)
+                os.set_blocking(fd, False)
+                
+            try:
+                active_fds = set(fd_to_tgt.keys())
+                while active_fds:
+                    events = poller.poll(0.5)
+                    for fd, event in events:
+                        tgt, p = fd_to_tgt[fd]
+                        if event & select.EPOLLIN:
+                            while True:
+                                line = p.stdout.readline()
+                                if not line:
+                                    break
+                                try:
+                                    text = line.decode('utf-8')
+                                except UnicodeDecodeError:
+                                    continue
+                                    
+                                if text.startswith("@@STATS@@"):
+                                    try:
+                                        stats = json.loads(text[9:])
+                                        live_stats[tgt]["checked"] = stats.get("checked", 0)
+                                        live_stats[tgt]["hits"] = stats.get("hits", 0)
+                                        live_stats[tgt]["wrote"] = stats.get("wrote", 0)
+                                        live_stats[tgt]["errors"] = stats.get("errors", 0)
+                                    except: pass
+                                else:
+                                    text_str = text.rstrip('\n')
+                                    if text_str:
+                                        live.console.print(text_str, markup=False)
+                                        
+                        if event & select.EPOLLHUP:
+                            poller.unregister(fd)
+                            active_fds.remove(fd)
+                            
+                    live.update(generate_table())
+                    
+            except KeyboardInterrupt:
+                live.console.print("\n  🛑 Shutting down supervisor...", style="bold red")
+
+            for p in procs.values():
+                try: p.terminate()
+                except: pass
+
         print("  ✅ Scan finished.")
         print("  💾 State saved. Restart to continue where you left off.\n")
 
