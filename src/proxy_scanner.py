@@ -965,6 +965,32 @@ Examples:
 
     args = parser.parse_args()
 
+    # If first time running and user needs cl1p token, prompt them (only in the supervisor, not child workers)
+    if not args.quiet_ui and args.target in ["cl1p", "all"]:
+        import src.config as config
+        try:
+            import src.secrets as secret_cfg
+            token1 = getattr(secret_cfg, 'CL1P_API_TOKEN', "")
+        except ImportError:
+            token1 = getattr(config, 'CL1P_API_TOKEN', "")
+            
+        if not token1:
+            print("\n  [ SETUP ] Accessing cl1p.net requires a free API token.")
+            print("  If you don't have one, get it from your dashboard on cl1p.net.")
+            new_token = input("  Enter your CL1P API token: ").strip()
+            if new_token:
+                secrets_path = Path("src/secrets.py")
+                # Append or create
+                with open(secrets_path, "a") as f:
+                    f.write(f"\nCL1P_API_TOKEN = '{new_token}'\n")
+                print("  [ SETUP ] ✓ Token saved securely to src/secrets.py (ignored by git).")
+                print("  Restarting to apply...\n")
+                import os
+                # Relaunch the exact same command
+                os.execv(sys.executable, ['python3'] + sys.argv)
+            else:
+                print("  [ SETUP ] Skipping. Cl1p functionality will be broken until configured.")
+
     # Load files
     if args.write_file: args.write = load_file_content(args.write_file)
     if args.target_cl1p_file: args.target_cl1p = load_file_content(args.target_cl1p_file)
