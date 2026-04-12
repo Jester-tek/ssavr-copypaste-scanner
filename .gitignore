@@ -49,3 +49,4 @@ Thumbs.db
 altrooo/
 push.sh
 paste_scanner.py
+src/secrets.py
