@@ -59,23 +59,45 @@ IP_STABILIZATION_DELAY = 0.5 # Wait before requests after IP change
 
 # Proxy Engine Configuration
 PROXY_SOURCES = [
+    # TheSpeedX (main + SOCKS-List mirror)
     "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/socks5.txt",
     "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/socks4.txt",
     "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/http.txt",
+    "https://raw.githubusercontent.com/TheSpeedX/SOCKS-List/master/socks5.txt",
+    "https://raw.githubusercontent.com/TheSpeedX/SOCKS-List/master/socks4.txt",
+    "https://raw.githubusercontent.com/TheSpeedX/SOCKS-List/master/http.txt",
+    # Proxifly
     "https://cdn.jsdelivr.net/gh/proxifly/free-proxy-list@main/proxies/protocols/socks5/data.txt",
+    "https://cdn.jsdelivr.net/gh/proxifly/free-proxy-list@main/proxies/protocols/http/data.txt",
     "https://cdn.jsdelivr.net/gh/proxifly/free-proxy-list@main/proxies/all/data.txt",
+    # ProxyGenerator (pre-verified stable)
+    "https://raw.githubusercontent.com/proxygenerator1/ProxyGenerator/main/MostStable/socks5.txt",
+    "https://raw.githubusercontent.com/proxygenerator1/ProxyGenerator/main/Stable/http.txt",
+    "https://raw.githubusercontent.com/proxygenerator1/ProxyGenerator/main/Stable/socks5.txt",
+    # dpangestuw
     "https://raw.githubusercontent.com/dpangestuw/Free-Proxy/refs/heads/main/socks5_proxies.txt",
     "https://raw.githubusercontent.com/dpangestuw/Free-Proxy/refs/heads/main/allive.txt",
+    # komutan234
     "https://raw.githubusercontent.com/komutan234/Proxy-List-Free/main/proxies/socks5.txt",
     "https://raw.githubusercontent.com/komutan234/Proxy-List-Free/main/proxies/http.txt",
+    # officialputuid
     "https://raw.githubusercontent.com/officialputuid/KangProxy/KangProxy/http/http.txt",
     "https://raw.githubusercontent.com/officialputuid/KangProxy/KangProxy/xResults/Proxies.txt",
+    # vmheaven
     "https://raw.githubusercontent.com/vmheaven/VMHeaven-Free-Proxy-Updated/main/all_proxies.txt",
+    # proxyscrape
     "https://api.proxyscrape.com/v2/?request=displayproxies&protocol=http",
+    "https://api.proxyscrape.com/v2/?request=displayproxies&protocol=socks5",
+    "https://api.proxyscrape.com/v2/?request=displayproxies&protocol=socks4",
+    # monosans
     "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/socks5.txt",
     "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/http.txt",
+    # hookzof + ShiftyTR
     "https://raw.githubusercontent.com/hookzof/socks5_list/master/proxy.txt",
     "https://raw.githubusercontent.com/ShiftyTR/Proxy-List/master/socks5.txt",
+    # roosterkid
+    "https://raw.githubusercontent.com/roosterkid/openproxylist/main/SOCKS5_RAW.txt",
+    "https://raw.githubusercontent.com/roosterkid/openproxylist/main/HTTPS_RAW.txt",
 ]
 PROXY_THREAD_COUNT = 500 # Number of concurrent proxy requests
 PROXY_CONNECT_TIMEOUT = 12 # Seconds to wait for a free proxy to connect
