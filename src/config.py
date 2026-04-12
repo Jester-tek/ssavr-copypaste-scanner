@@ -99,7 +99,7 @@ PROXY_SOURCES = [
     "https://raw.githubusercontent.com/roosterkid/openproxylist/main/SOCKS5_RAW.txt",
     "https://raw.githubusercontent.com/roosterkid/openproxylist/main/HTTPS_RAW.txt",
 ]
-PROXY_THREAD_COUNT = 500 # Number of concurrent proxy requests
+PROXY_THREAD_COUNT = 1200 # Number of concurrent proxy requests
 PROXY_CONNECT_TIMEOUT = 12 # Seconds to wait for a free proxy to connect
 
 def load_config():
