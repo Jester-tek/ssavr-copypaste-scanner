@@ -901,7 +901,7 @@ class PasteScanner:
             if tgt == "justpaste":
                 tgt_mode = "read"
 
-            cmd = [sys.executable, sys.argv[0], "--mod2", "-t", tgt, "--quiet-ui"]
+            cmd = [sys.executable, "-u", sys.argv[0], "--mod2", "-t", tgt, "--quiet-ui"]
             if getattr(self.args, 'reset', False): cmd.append("--reset")
             if getattr(self.args, 'start', ''): cmd.extend(["--start", self.args.start])
 
