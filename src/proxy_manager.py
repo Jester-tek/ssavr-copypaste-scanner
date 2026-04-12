@@ -2,8 +2,13 @@ import re
 import requests
 import random
 import time
+import json
 import threading
+from pathlib import Path
+from datetime import datetime
 from . import config, utils
+
+CACHE_FILE = Path("data/proxies_cache.json")
 
 class ProxyManager:
     def __init__(self):
@@ -14,9 +19,29 @@ class ProxyManager:
         self._refresh_running = False
         self._refresh_thread = None
         
-    def fetch_proxies(self, randomize=False):
-        """Fetches free proxies from multiple sources."""
-        print("🌍 Fetching free proxies from sources...", flush=True)
+    def fetch_proxies(self, randomize=False, force_fetch=False):
+        """Fetches free proxies from cache or multiple sources."""
+        with self.lock:
+            # Check cache if not forcing fresh fetch
+            if not force_fetch and CACHE_FILE.exists():
+                try:
+                    with open(CACHE_FILE, "r") as f:
+                        cache_data = json.load(f)
+                    
+                    # If cache is < 30 minutes old, load it instead of fetching
+                    age_seconds = time.time() - cache_data.get('timestamp', 0)
+                    if age_seconds < (30 * 60):
+                        print(f"🌍 Loading proxies from fresh cache ({int(age_seconds/60)} mins old)...", flush=True)
+                        self.proxies_list = cache_data.get('proxies', [])
+                        self.proxies_dict = {p['address']: p for p in self.proxies_list}
+                        if randomize:
+                            random.shuffle(self.proxies_list)
+                        print(f"  ✓ {len(self.proxies_list)} proxies loaded instantly from cache", flush=True)
+                        return
+                except Exception:
+                    pass
+        
+        print("🌍 Fetching fresh free proxies from network sources...", flush=True)
         raw_proxies = set()
         
         # Shuffle sources to distribute load and vary initial batch
@@ -67,6 +92,17 @@ class ProxyManager:
                 self.proxies_dict = {p['address']: p for p in self.proxies_list}
             
             print(f"=> Total active proxies in pool: {len(self.proxies_list)} (+{added} fresh)")
+            
+            # Save the new fetch to cache
+            try:
+                CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
+                with open(CACHE_FILE, "w") as f:
+                    json.dump({
+                        'timestamp': time.time(),
+                        'proxies': self.proxies_list
+                    }, f)
+            except Exception as e:
+                print(f"  [!] Could not save proxy cache: {e}")
             
             if randomize:
                 random.shuffle(self.proxies_list)

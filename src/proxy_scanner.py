@@ -640,7 +640,7 @@ class PasteScanner:
                         result["status"] = "error"
             else:
                 if result.get("status") != "hit+write":
-                    result["status"] = "empty" if not existing else "occupied"
+                    result["status"] = "occupied" if existing else "empty"
 
             return result
             
@@ -846,6 +846,8 @@ class PasteScanner:
                                 pass
                             elif r["status"] == "mine":
                                 self.stats["skipped_mine"] += 1
+                            elif r["status"] == "occupied":
+                                pass
                             else:
                                 self.stats["empty"] += 1
                 finally:
@@ -926,12 +928,12 @@ class PasteScanner:
         def generate_table():
             table = Table(title="Live Scanner Performance", style="cyan")
             table.add_column("Site", justify="right", style="cyan", no_wrap=True)
-            table.add_column("URLs Visti", justify="center", style="magenta")
-            table.add_column("Testi Trovati", justify="center", style="green")
-            table.add_column("Scritture OK", justify="center", style="yellow")
-            table.add_column("Pagine Vuote", justify="center", style="dim white")
-            table.add_column("Saltati/Dupl.", justify="center", style="dim yellow")
-            table.add_column("Errori/Limit", justify="center", style="red")
+            table.add_column("URLs Scanned", justify="center", style="magenta")
+            table.add_column("Hits Found", justify="center", style="green")
+            table.add_column("Written OK", justify="center", style="yellow")
+            table.add_column("Empty/404", justify="center", style="dim white")
+            table.add_column("Skipped", justify="center", style="dim yellow")
+            table.add_column("Errors/Limit", justify="center", style="red")
             
             for tgt in ["cl1p", "justpaste", "rentry"]:
                 s = live_stats[tgt]
