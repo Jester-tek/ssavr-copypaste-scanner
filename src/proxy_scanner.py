@@ -363,7 +363,7 @@ class PasteScanner:
             self.api_token = getattr(config, 'CL1P_API_TOKEN', "")
             
         if self.target == "cl1p":
-            self.workers = 300
+            self.workers = 100
             self.using_proxies = False
         elif self.target == "rentry":
             self.workers = 1200
@@ -631,8 +631,6 @@ class PasteScanner:
                         _t.sleep(0.3)
                         verify = client.read(url_str)
                         if verify and self.write_msg[:30] in verify:
-                            with self.stats_lock:
-                                self.stats["wrote"] += 1
                             if result.get("status") != "hit+write":
                                 result["status"] = "wrote"
                         else:
@@ -739,16 +737,24 @@ class PasteScanner:
                 print(f"     | ... [{len(lines)-40} more lines omitted, see .txt file]")
             print()
 
-    def _print_wrote(self, url_str, verified=True):
-        """Print to screen when a message is successfully written."""
-        if not self.quiet_ui:
-            sys.stdout.write(f"\r{' '*100}\r")
-        clean_url = f"{self.site_url.replace('https://', '')}/{url_str}"
-        if verified:
-            print(f"  ✅ WROTE+VERIFIED! {clean_url}")
-        else:
-            print(f"  ⚠️  WROTE but NOT verified {clean_url}")
-        print()
+    def _print_wrote_batched(self, message):
+        """Batch pushing to UI array to be flushed independently, drastically reducing I/O lock up."""
+        if not hasattr(self, '_print_batch'):
+            self._print_batch = []
+            self._last_batch_time = time.time()
+        self._print_batch.append(message)
+
+    def _flush_print_batch(self):
+        """Flush the saved prints array every 2 seconds to terminal to conserve CPU."""
+        if hasattr(self, '_print_batch') and self._print_batch:
+            if time.time() - self._last_batch_time >= 2.0:
+                if not self.quiet_ui:
+                    sys.stdout.write(f"\r{' '*100}\r")
+                for msg in self._print_batch:
+                    print(msg)
+                print()
+                self._print_batch.clear()
+                self._last_batch_time = time.time()
 
     def _print_rate_limit_warning(self):
         pass
@@ -816,6 +822,10 @@ class PasteScanner:
                     time.sleep(1)
                     rate_limit_cooldown -= 1
                     continue
+                
+                # Try to batch print queue if 2 seconds passed
+                if hasattr(self, '_flush_print_batch'):
+                    self._flush_print_batch()
 
                 batch = list(range(self.current_idx, self.current_idx + self.workers))
 
@@ -845,12 +855,14 @@ class PasteScanner:
                                                 content=r.get("content", ""),
                                                 is_revision=True)
                             elif r["status"] == "wrote":
-                                self.stats["empty"] += 1
-                                self._print_wrote(r["url"], verified=True)
+                                self.stats["wrote"] += 1
+                                msg = f"  ✅ WROTE+VERIFIED! {self.site_url.replace('https://', '')}/{r['url']}"
+                                self._print_wrote_batched(msg)
                             elif r["status"] == "wrote_fake":
-                                self.stats["empty"] += 1
                                 self.stats["wrote_fake"] += 1
-                                self._print_wrote(r["url"], verified=False)
+                                self.stats["empty"] += 1
+                                msg = f"  ⚠️  WROTE but NOT verified {self.site_url.replace('https://', '')}/{r['url']}"
+                                self._print_wrote_batched(msg)
                             elif r["status"] == "empty":
                                 self.stats["empty"] += 1
                             elif r["status"] in ["duplicate", "occupied"]:
@@ -970,7 +982,7 @@ class PasteScanner:
                 )
             return table
 
-        with Live(generate_table(), refresh_per_second=4, screen=False) as live:
+        with Live(generate_table(), refresh_per_second=2, screen=False) as live:
             poller = select.epoll()
             fd_to_tgt = {}
             for tgt, p in procs.items():
