@@ -356,8 +356,12 @@ class PasteScanner:
             self.running = True
             return
             
-        # Hardcoded smart options
-        self.api_token = getattr(config, 'CL1P_API_TOKEN', "")
+        try:
+            import src.secrets as secret_cfg
+            self.api_token = getattr(secret_cfg, 'CL1P_API_TOKEN', "")
+        except ImportError:
+            self.api_token = getattr(config, 'CL1P_API_TOKEN', "")
+            
         if self.target == "cl1p":
             self.workers = 50
             self.using_proxies = False
