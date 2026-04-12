@@ -899,14 +899,14 @@ class PasteScanner:
         
         live_stats = {
             "cl1p": {"checked": 0, "hits": 0, "wrote": 0, "errors": 0},
-            "justpaste": {"checked": 0, "hits": 0, "wrote": 0, "errors": 0},
+            "justpaste (READ-ONLY)": {"checked": 0, "hits": 0, "wrote": 0, "errors": 0},
             "rentry": {"checked": 0, "hits": 0, "wrote": 0, "errors": 0}
         }
         
         procs = {}
-        for tgt in ["cl1p", "justpaste", "rentry"]:
+        for tgt in ["cl1p", "justpaste (READ-ONLY)", "rentry"]:
             tgt_mode = self.mode
-            if tgt == "justpaste":
+            if tgt == "justpaste (READ-ONLY)":
                 tgt_mode = "read"
 
             cmd = [sys.executable, "-u", sys.argv[0], "--mod2", "-t", tgt, "--quiet-ui"]
@@ -935,16 +935,16 @@ class PasteScanner:
             table.add_column("Written OK", justify="center", style="yellow")
             table.add_column("Empty/404", justify="center", style="dim white")
             table.add_column("Skipped", justify="center", style="dim yellow")
-            table.add_column("Errors/Limit", justify="center", style="red")
-            
             for tgt in ["cl1p", "justpaste", "rentry"]:
                 s = live_stats[tgt]
                 status = "🟡" if procs[tgt].poll() is None else "🪦"
                 
                 skipped = s.get("duplicates", 0) + s.get("foreign_skipped", 0) + s.get("skipped_mine", 0)
                 
+                display_name = f"justpaste (READ)" if tgt == "justpaste" else tgt
+                
                 table.add_row(
-                    f"{tgt} {status}",
+                    f"{display_name} {status}",
                     str(s.get("checked", 0)),
                     str(s.get("hits", 0)),
                     str(s.get("wrote", 0)),
@@ -1040,7 +1040,7 @@ Examples:
         """
     )
 
-    parser.add_argument("-t", "--target", choices=["cl1p", "justpaste", "rentry", "all"], required=True,
+    parser.add_argument("-t", "--target", choices=["cl1p", "justpaste (READ-ONLY)", "rentry", "all"], required=True,
                         help="Target site (cl1p, justpaste, rentry or 'all')")
     
     # Write arguments mirroring tor_scanner
@@ -1106,7 +1106,7 @@ Examples:
 
     # Handle reset-all
     if args.reset_all:
-        targets = ["cl1p", "justpaste", "rentry"]
+        targets = ["cl1p", "justpaste (READ-ONLY)", "rentry"]
         state = {}
         if STATE_FILE.exists():
             try:
