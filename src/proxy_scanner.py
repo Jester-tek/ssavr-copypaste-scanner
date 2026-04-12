@@ -786,6 +786,15 @@ class PasteScanner:
         self._print_header()
 
         rate_limit_cooldown = 0
+        
+        if getattr(self.args, 'quiet_ui', False):
+            def _stats_emitter():
+                while self.running:
+                    with self.stats_lock:
+                        print(f"@@STATS@@{json.dumps(self.stats)}", flush=True)
+                    time.sleep(1)
+            import threading
+            threading.Thread(target=_stats_emitter, daemon=True).start()
 
         try:
             while self.running:
@@ -798,11 +807,6 @@ class PasteScanner:
                     continue
 
                 batch = list(range(self.current_idx, self.current_idx + self.workers))
-
-                # Periodically emit stats for supervisor
-                if getattr(self.args, 'quiet_ui', False):
-                    with self.stats_lock:
-                        print(f"@@STATS@@{json.dumps(self.stats)}", flush=True)
 
                 executor = ThreadPoolExecutor(max_workers=self.workers)
                 futures = {executor.submit(self._process_url, idx): idx for idx in batch}
@@ -922,20 +926,27 @@ class PasteScanner:
         def generate_table():
             table = Table(title="Live Scanner Performance", style="cyan")
             table.add_column("Site", justify="right", style="cyan", no_wrap=True)
-            table.add_column("URLs Scanned", justify="center", style="magenta")
-            table.add_column("Saved / Hits", justify="center", style="green")
-            table.add_column("Written OK", justify="center", style="yellow")
-            table.add_column("Errors/Fails", justify="center", style="red")
+            table.add_column("URLs Visti", justify="center", style="magenta")
+            table.add_column("Testi Trovati", justify="center", style="green")
+            table.add_column("Scritture OK", justify="center", style="yellow")
+            table.add_column("Pagine Vuote", justify="center", style="dim white")
+            table.add_column("Saltati/Dupl.", justify="center", style="dim yellow")
+            table.add_column("Errori/Limit", justify="center", style="red")
             
             for tgt in ["cl1p", "justpaste", "rentry"]:
                 s = live_stats[tgt]
                 status = "🟡" if procs[tgt].poll() is None else "🪦"
+                
+                skipped = s.get("duplicates", 0) + s.get("foreign_skipped", 0) + s.get("skipped_mine", 0)
+                
                 table.add_row(
                     f"{tgt} {status}",
-                    str(s["checked"]),
-                    str(s["hits"]),
-                    str(s["wrote"]),
-                    str(s["errors"])
+                    str(s.get("checked", 0)),
+                    str(s.get("hits", 0)),
+                    str(s.get("wrote", 0)),
+                    str(s.get("empty", 0)),
+                    str(skipped),
+                    str(s.get("errors", 0))
                 )
             return table
 
@@ -971,6 +982,10 @@ class PasteScanner:
                                         live_stats[tgt]["hits"] = stats.get("hits", 0)
                                         live_stats[tgt]["wrote"] = stats.get("wrote", 0)
                                         live_stats[tgt]["errors"] = stats.get("errors", 0)
+                                        live_stats[tgt]["empty"] = stats.get("empty", 0)
+                                        live_stats[tgt]["duplicates"] = stats.get("duplicates", 0)
+                                        live_stats[tgt]["foreign_skipped"] = stats.get("foreign_skipped", 0)
+                                        live_stats[tgt]["skipped_mine"] = stats.get("skipped_mine", 0)
                                     except: pass
                                 else:
                                     text_str = text.rstrip('\n')
