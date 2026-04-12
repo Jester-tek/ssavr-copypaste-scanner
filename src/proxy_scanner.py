@@ -363,13 +363,13 @@ class PasteScanner:
             self.api_token = getattr(config, 'CL1P_API_TOKEN', "")
             
         if self.target == "cl1p":
-            self.workers = 50
+            self.workers = 300
             self.using_proxies = False
         elif self.target == "rentry":
-            self.workers = 200
+            self.workers = 1200
             self.using_proxies = True
         else:
-            self.workers = 200
+            self.workers = 1200
             self.using_proxies = True
 
         self.running = True
@@ -1040,7 +1040,7 @@ Examples:
         """
     )
 
-    parser.add_argument("-t", "--target", choices=["cl1p", "justpaste (READ-ONLY)", "rentry", "all"], required=True,
+    parser.add_argument("-t", "--target", choices=["cl1p", "justpaste", "rentry", "all"], required=True,
                         help="Target site (cl1p, justpaste, rentry or 'all')")
     
     # Write arguments mirroring tor_scanner

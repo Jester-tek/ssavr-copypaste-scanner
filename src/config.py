@@ -52,8 +52,8 @@ DEFAULT_CONTROL_PORT = SCANNER_CONTROL_PORT
 
 # Performance / Timeouts
 TOR_CONNECT_TIMEOUT = 25  # Seconds to wait for Tor IP verification
-SITE_READ_TIMEOUT = 6
-SITE_WRITE_TIMEOUT = 10  # Seconds to wait for website
+SITE_READ_TIMEOUT = 3
+SITE_WRITE_TIMEOUT = 5  # Seconds to wait for website
 SITE_RETRY_DELAY = 1      # Seconds between retries
 IP_STABILIZATION_DELAY = 0.5 # Wait before requests after IP change
 
