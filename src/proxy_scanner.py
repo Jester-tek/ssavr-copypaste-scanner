@@ -1025,7 +1025,8 @@ class PasteScanner:
                                         try:
                                             live.console.print(text_str, markup=False, highlight=False)
                                         except Exception:
-                                            print(text_str)
+                                            sys.__stdout__.write(text_str.encode('ascii', 'ignore').decode('ascii') + '\n')
+                                            sys.__stdout__.flush()
                                         
                         if event & select.EPOLLHUP:
                             poller.unregister(fd)
