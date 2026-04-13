@@ -1022,7 +1022,10 @@ class PasteScanner:
                                 else:
                                     text_str = text.rstrip('\n')
                                     if text_str:
-                                        live.console.print(text_str, markup=False)
+                                        try:
+                                            live.console.print(text_str, markup=False, highlight=False)
+                                        except Exception:
+                                            print(text_str)
                                         
                         if event & select.EPOLLHUP:
                             poller.unregister(fd)
