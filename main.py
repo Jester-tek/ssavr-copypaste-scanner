@@ -54,7 +54,7 @@ Examples:
   python3 main.py --mod1 -t SS --loop
   python3 main.py --mod1 -tsf altrooo/messaggiosavr.txt
   python3 main.py --mod2 -t cl1p -w "message"
-  python3 main.py --mod2 -t all -tcf target_cl1p_file.txt
+  python3 main.py --mod2 -t all -wf target_file.txt
   python3 main.py --mod2 -t all --reset-all
 
 For detailed help on a specific module, use:

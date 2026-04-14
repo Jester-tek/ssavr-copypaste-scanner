@@ -435,12 +435,10 @@ class PasteScanner:
         """Load write message from args (which were already populated from file loading in main)."""
         if self.mode != "write":
             return None
-        # Specific target takes precedence over global write
-        if self.target == "cl1p" and getattr(self.args, "target_cl1p", None):
-            return self.args.target_cl1p
-        if self.target == "rentry" and getattr(self.args, "target_rentry", None):
-            return self.args.target_rentry
-        return getattr(self.args, "write", None)
+        # Only allow writing on cl1p
+        if self.target == "cl1p":
+            return getattr(self.args, "write", None)
+        return None
 
     def _load_state(self):
         if STATE_FILE.exists():
@@ -623,7 +621,7 @@ class PasteScanner:
 
             # Write our message
             if should_write:
-                if self.target in ["cl1p", "rentry"]:
+                if self.target == "cl1p":
                     wrote = client.write(url_str, self.write_msg)
                     if wrote is True:
                         # Verify write by re-reading
@@ -1075,13 +1073,9 @@ Examples:
     parser.add_argument("-t", "--target", choices=["cl1p", "justpaste", "rentry", "all"], required=True,
                         help="Target site (cl1p, justpaste, rentry or 'all')")
     
-    # Write arguments mirroring tor_scanner
-    parser.add_argument('-w', '--write', help='Write message to all allowed sites (cl1p, rentry)')
-    parser.add_argument('-wf', '--write-file', help='Write message from file to all allowed sites (cl1p, rentry)')
-    parser.add_argument('-tc', '--target-cl1p', help='Write message only to cl1p.net')
-    parser.add_argument('-tcf', '--target-cl1p-file', help='Write from file only to cl1p.net')
-    parser.add_argument('-tr', '--target-rentry', help='Write message only to rentry.co')
-    parser.add_argument('-trf', '--target-rentry-file', help='Write from file only to rentry.co')
+    # Write arguments
+    parser.add_argument('-w', '--write', help='Write message (only supported on cl1p.net)')
+    parser.add_argument('-wf', '--write-file', help='Write message from file (only supported on cl1p.net)')
                         
     parser.add_argument("--reset", action="store_true",
                         help="Reset scan for a specific site from scratch")
@@ -1120,21 +1114,19 @@ Examples:
                 print("  [ SETUP ] Skipping. Cl1p functionality will be broken until configured.")
 
     # Load files
-    if args.write_file: args.write = load_file_content(args.write_file)
-    if args.target_cl1p_file: args.target_cl1p = load_file_content(args.target_cl1p_file)
-    if getattr(args, 'target_rentry_file', None): args.target_rentry = load_file_content(args.target_rentry_file)
+    if getattr(args, 'write_file', None): args.write = load_file_content(args.write_file)
 
     # Determine mode based on whether a write command is active for the target
     args.mode = "read"
-    if args.write or getattr(args, 'target_cl1p', None) or getattr(args, 'target_rentry', None):
-        if args.target in ["cl1p", "rentry", "all"]:
+    if getattr(args, 'write', None):
+        if args.target in ["cl1p", "all"]:
             args.mode = "write"
             
-            # Note: justpaste does not support writing via API.
+            # justpaste and rentry do not support writing reliably.
             # So if `-t all` is used with a global `-w`, we don't throw an error,
-            # the supervisor simply routes read strict to it.
+            # the supervisor simply routes read strict to them.
         else:
-            parser.error(f"{args.target} does not support writing via API.")
+            parser.error(f"{args.target} does not support writing.")
 
     # Handle reset-all
     if args.reset_all:
