@@ -383,6 +383,7 @@ class PasteScanner:
             "empty": 0,
             "errors": 0,
             "wrote": 0,
+            "wrote_fake": 0,
             "skipped_mine": 0,
             "proxies_rotated": 0,
             "revisions": 0,
@@ -931,24 +932,17 @@ class PasteScanner:
         procs = {}
         for tgt in ["cl1p", "justpaste", "rentry"]:
             tgt_mode = self.mode
-            if tgt == "justpaste":
+            # justpaste and rentry are read-only
+            if tgt in ["justpaste", "rentry"]:
                 tgt_mode = "read"
 
             cmd = [sys.executable, "-u", sys.argv[0], "--mod2", "-t", tgt, "--quiet-ui"]
             if getattr(self.args, 'reset', False): cmd.append("--reset")
             if getattr(self.args, 'start', ''): cmd.extend(["--start", self.args.start])
 
-            if tgt_mode == "write":
-                if tgt == "cl1p":
-                    if getattr(self.args, 'target_cl1p_file', None): cmd.extend(["-tcf", self.args.target_cl1p_file])
-                    elif getattr(self.args, 'target_cl1p', None): cmd.extend(["-tc", self.args.target_cl1p])
-                    elif getattr(self.args, 'write_file', None): cmd.extend(["-wf", self.args.write_file])
-                    elif getattr(self.args, 'write', None): cmd.extend(["-w", self.args.write])
-                elif tgt == "rentry":
-                    if getattr(self.args, 'target_rentry_file', None): cmd.extend(["-trf", self.args.target_rentry_file])
-                    elif getattr(self.args, 'target_rentry', None): cmd.extend(["-tr", self.args.target_rentry])
-                    elif getattr(self.args, 'write_file', None): cmd.extend(["-wf", self.args.write_file])
-                    elif getattr(self.args, 'write', None): cmd.extend(["-w", self.args.write])
+            if tgt_mode == "write" and tgt == "cl1p":
+                if getattr(self.args, 'write_file', None): cmd.extend(["-wf", self.args.write_file])
+                elif getattr(self.args, 'write', None): cmd.extend(["-w", self.args.write])
                 
             procs[tgt] = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
 
