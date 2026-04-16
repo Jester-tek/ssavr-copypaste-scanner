@@ -24,7 +24,7 @@ from src.sites.cl1p_api import Cl1pAPIClient
 from src.sites.justpaste_api import JustPasteClient
 from src.sites.rentry_api import RentryClient
 from src.proxy_manager import ProxyManager
-from src import config
+from src import config, utils
 
 # ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -623,7 +623,7 @@ class PasteScanner:
             # Write our message
             if should_write:
                 if self.target == "cl1p":
-                    wrote = client.write(url_str, self.write_msg)
+                    wrote = client.write(url_str, utils.normalize_text_output(self.write_msg))
                     if wrote is True:
                         # Verify write by re-reading
                         import time as _t
@@ -807,7 +807,8 @@ class PasteScanner:
             def _stats_emitter():
                 while self.running:
                     with self.stats_lock:
-                        print(f"@@STATS@@{json.dumps(self.stats)}", flush=True)
+                        sys.stderr.write(f"@@STATS@@{json.dumps(self.stats)}\n")
+                        sys.stderr.flush()
                     time.sleep(1)
             import threading
             threading.Thread(target=_stats_emitter, daemon=True).start()
@@ -944,7 +945,7 @@ class PasteScanner:
                 if getattr(self.args, 'write_file', None): cmd.extend(["-wf", self.args.write_file])
                 elif getattr(self.args, 'write', None): cmd.extend(["-w", self.args.write])
                 
-            procs[tgt] = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+            procs[tgt] = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
         def generate_table():
             table = Table(title="Live Scanner Performance", style="cyan")
@@ -976,22 +977,29 @@ class PasteScanner:
 
         with Live(generate_table(), refresh_per_second=2, screen=False) as live:
             poller = select.epoll()
-            fd_to_tgt = {}
+            fd_to_tgt = {}     # fd -> (target_name, proc, 'stdout'|'stderr')
             for tgt, p in procs.items():
-                fd = p.stdout.fileno()
-                poller.register(fd, select.EPOLLIN)
-                fd_to_tgt[fd] = (tgt, p)
-                os.set_blocking(fd, False)
+                # Register stdout for display output
+                out_fd = p.stdout.fileno()
+                poller.register(out_fd, select.EPOLLIN)
+                fd_to_tgt[out_fd] = (tgt, p, 'stdout')
+                os.set_blocking(out_fd, False)
+                # Register stderr for stats
+                err_fd = p.stderr.fileno()
+                poller.register(err_fd, select.EPOLLIN)
+                fd_to_tgt[err_fd] = (tgt, p, 'stderr')
+                os.set_blocking(err_fd, False)
                 
             try:
                 active_fds = set(fd_to_tgt.keys())
                 while active_fds:
                     events = poller.poll(0.5)
                     for fd, event in events:
-                        tgt, p = fd_to_tgt[fd]
+                        tgt, p, pipe_type = fd_to_tgt[fd]
                         if event & select.EPOLLIN:
+                            stream = p.stderr if pipe_type == 'stderr' else p.stdout
                             while True:
-                                line = p.stdout.readline()
+                                line = stream.readline()
                                 if not line:
                                     break
                                 try:
@@ -1022,7 +1030,7 @@ class PasteScanner:
                                         
                         if event & select.EPOLLHUP:
                             poller.unregister(fd)
-                            active_fds.remove(fd)
+                            active_fds.discard(fd)
                             
                     live.update(generate_table())
                     
