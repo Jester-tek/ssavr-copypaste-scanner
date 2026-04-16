@@ -16,15 +16,25 @@ static inline int is_foreign_cp(uint32_t cp) {
     return 0;
 }
 
-// Scans UTF-8 string. Returns 1 if foreign count > threshold.
+// Ratio-based filter: returns 1 if foreign_ratio > threshold%.
+// threshold is a percentage (e.g. 50 = skip if >50% foreign).
 int is_foreign_content(const char *text, int threshold) {
     if (!text) return 0;
-    int count = 0;
+    int foreign_count = 0;
+    int latin_count = 0;
+    
     while (*text) {
         uint32_t cp = 0;
         unsigned char c = (unsigned char)(*text);
         
-        if (c < 0x80) { text++; continue; }
+        if (c < 0x80) {
+            // ASCII: count letters and digits as latin
+            if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')) {
+                latin_count++;
+            }
+            text++;
+            continue;
+        }
         else if ((c & 0xE0) == 0xC0) {
             if (!text[1]) break;
             cp = ((c & 0x1F) << 6) | ((unsigned char)text[1] & 0x3F);
@@ -43,11 +53,17 @@ int is_foreign_content(const char *text, int threshold) {
         else { text++; continue; }
 
         if (is_foreign_cp(cp)) {
-            count++;
-            if (count > threshold) return 1;
+            foreign_count++;
+        }
+        // Latin Extended (accented chars: è, à, ñ, ü, etc.)
+        else if (cp >= 0x00C0 && cp <= 0x024F) {
+            latin_count++;
         }
     }
-    return 0;
+    
+    int total = foreign_count + latin_count;
+    if (total < 10) return 0;  // too short to judge
+    return (foreign_count * 100 / total) > threshold;
 }
 
 void index_to_string(uint64_t index, char *buf) {

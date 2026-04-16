@@ -101,24 +101,30 @@ FOREIGN_REGEX = re.compile(
     r'[\u0600-\u06FF\u0400-\u04FF\u4E00-\u9FFF\u3040-\u30FF\uAC00-\uD7A3'
     r'\u0E00-\u0E7F\u0590-\u05FF\u0900-\u097F\u0B80-\u0BFF]'
 )
+LATIN_REGEX = re.compile(r'[a-zA-Z0-9\u00C0-\u024F]')
 
 def get_foreign_chars(text):
     """Return all characters in the text that trigger the foreign filter."""
     m = FOREIGN_REGEX.findall(text)
     return "".join(m)
 
-def is_foreign_content(text, threshold=6):
-    """C-compiled filter that bypasses GIL, thousands of times faster than regex."""
+def is_foreign_content(text, threshold=50):
+    """Ratio-based filter: skip only if more than threshold% of readable
+    characters are in foreign scripts. This allows aesthetic bios with
+    a few decorative kanji/symbols to pass through while blocking walls
+    of Arabic/Russian/Chinese text.
+    
+    Uses C extension when available for speed, falls back to Python regex."""
     if _ext_loaded:
         text_bytes = text.encode("utf-8", errors="ignore")
         return _fast.is_foreign_content(text_bytes, threshold) == 1
     
-    count = 0
-    for _ in FOREIGN_REGEX.finditer(text):
-        count += 1
-        if count > threshold:
-            return True
-    return False
+    foreign = len(FOREIGN_REGEX.findall(text))
+    latin = len(LATIN_REGEX.findall(text))
+    total = foreign + latin
+    if total < 10:
+        return False  # too short to judge
+    return (foreign * 100 // total) > threshold
 
 
 # ─── URL Content History (V2 Revision Tracking) ─────────────────────────────
@@ -273,14 +279,14 @@ class ResultsWriter:
             with open(self.filepath, "w", encoding="utf-8") as f:
                 f.write(self._format_header() + "\n")
 
-        # Foreign script filter
-        if is_foreign_content(content, threshold=6):
+        # Foreign script filter (ratio-based: skip if >50% foreign)
+        if is_foreign_content(content, threshold=50):
             self.record_skip("foreign")
             try:
                 foreign_chars = get_foreign_chars(content)
                 preview = content[:200].replace('\n', ' ')
                 with open(SKIP_DEBUG_FILE, "a", encoding="utf-8") as dbg:
-                    dbg.write(f"[FOREIGN] {full_url} | Chars: {foreign_chars} | {preview}\n")
+                    dbg.write(f"[FOREIGN] {full_url} | Chars: {foreign_chars[:30]} | {preview}\n")
             except: pass
             return "foreign"
         
