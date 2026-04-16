@@ -28,6 +28,8 @@ from src import config, utils
 
 # ─── Constants ────────────────────────────────────────────────────────────────
 
+SKIP_DEBUG_FILE = Path(config.DATA_DIR) / "skip_debug.txt"
+
 VERSION = "1.1.0"
 CHARSET = "abcdefghijklmnopqrstuvwxyz0123456789"
 STATE_FILE = Path("data/url_forcer_state.json")
@@ -267,6 +269,11 @@ class ResultsWriter:
         # Foreign script filter
         if is_foreign_content(content, threshold=3):
             self.record_skip("foreign")
+            try:
+                preview = content[:200].replace('\n', ' ')
+                with open(SKIP_DEBUG_FILE, "a", encoding="utf-8") as dbg:
+                    dbg.write(f"[FOREIGN] {full_url} | {preview}\n")
+            except: pass
             return "foreign"
         
         h = self._hash(content)
@@ -549,6 +556,11 @@ class PasteScanner:
 
             if self.history.is_mine(content):
                 result["status"] = "mine"
+                try:
+                    preview = content[:200].replace('\n', ' ')
+                    with open(SKIP_DEBUG_FILE, "a", encoding="utf-8") as dbg:
+                        dbg.write(f"[MINE] {full_url} | {preview}\n")
+                except: pass
                 return result
 
             # V2 revision tracking
@@ -566,6 +578,11 @@ class PasteScanner:
             # Deduplication check (global content dedup)
             if self.results.is_duplicate(content):
                 self.results.record_skip("duplicate")
+                try:
+                    preview = content[:200].replace('\n', ' ')
+                    with open(SKIP_DEBUG_FILE, "a", encoding="utf-8") as dbg:
+                        dbg.write(f"[DUPLICATE] {full_url} | {preview}\n")
+                except: pass
                 result["status"] = "duplicate"
                 return result
 
@@ -775,14 +792,14 @@ class PasteScanner:
         print(f"  🔄 URLs checked: {self.stats['checked']}")
         print(f"  ✨ New content found: {self.stats['hits']}")
         print(f"  📝 Revisions (V2+): {self.stats['revisions']}")
-        print(f"  🔁 Duplicates skipped: {self.stats['duplicates']}")
         print(f"  🌍 Foreign languages skipped: {self.stats['foreign_skipped']}")
+        print(f"  🔁 Duplicates skipped: {self.stats['duplicates']}")
+        print(f"  🏠 Own messages skipped: {self.stats['skipped_mine']}")
+        print(f"  📊 Skip breakdown: foreign={self.stats['foreign_skipped']}, dup={self.stats['duplicates']}, mine={self.stats['skipped_mine']}")
         print(f"  📝 Empty/404: {self.stats['empty']}")
         print(f"  ❌ Network errors: {self.stats['errors']}")
         if self.mode == "write":
             print(f"  ✍  Messages written: {self.stats['wrote']}")
-        if self.stats['skipped_mine']:
-            print(f"  ⏩ Skipped (own): {self.stats['skipped_mine']}")
         print(f"  📁 Results file: {self.results.filepath}")
         print(f"  📊 Total results in file: {self.results.get_count()}")
         print("=" * 60)
