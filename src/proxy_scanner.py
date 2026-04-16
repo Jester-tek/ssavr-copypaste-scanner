@@ -570,6 +570,11 @@ class PasteScanner:
             if version == -1:
                 # Same content as before, skip
                 result["status"] = "duplicate"
+                try:
+                    preview = content[:200].replace('\n', ' ')
+                    with open(SKIP_DEBUG_FILE, "a", encoding="utf-8") as dbg:
+                        dbg.write(f"[ALREADY_SEEN_ON_URL] {full_url} | {preview}\n")
+                except: pass
                 return result
 
             # Register this URL+hash
@@ -632,6 +637,11 @@ class PasteScanner:
                         self.results.save(self.target, url_str, full_url, existing, title=getattr(client, 'last_title', None), version=version)
                     else:
                         result["status"] = "occupied"
+                        try:
+                            preview = existing[:200].replace('\n', ' ')
+                            with open(SKIP_DEBUG_FILE, "a", encoding="utf-8") as dbg:
+                                dbg.write(f"[ALREADY_SEEN_ON_URL] {full_url} | {preview}\n")
+                        except: pass
                 else:
                     if self.history.is_mine(existing):
                         result["status"] = "mine"
