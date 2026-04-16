@@ -150,28 +150,30 @@ class URLContentHistory:
             except Exception:
                 pass
 
-    def get_version(self, url_path, content_hash):
+    def get_version(self, site_prefix, url_path, content_hash):
         """Check if this URL+hash combo is known.
         Returns:
             0  = brand new URL, never seen
             -1 = URL seen before, same content hash (duplicate, skip)
             N  = URL seen before, NEW content hash; N is the version number (2, 3, ...)
         """
+        key = f"{site_prefix}:{url_path}"
         with self._lock:
-            if url_path not in self._data:
+            if key not in self._data:
                 return 0
-            hashes = self._data[url_path]
+            hashes = self._data[key]
             if content_hash in hashes:
                 return -1  # same content, skip
             return len(hashes) + 1  # next version
 
-    def register(self, url_path, content_hash):
+    def register(self, site_prefix, url_path, content_hash):
         """Register a URL+hash pair."""
+        key = f"{site_prefix}:{url_path}"
         with self._lock:
-            if url_path not in self._data:
-                self._data[url_path] = []
-            if content_hash not in self._data[url_path]:
-                self._data[url_path].append(content_hash)
+            if key not in self._data:
+                self._data[key] = []
+            if content_hash not in self._data[key]:
+                self._data[key].append(content_hash)
                 self._dirty = True
 
 
@@ -565,7 +567,7 @@ class PasteScanner:
 
             # V2 revision tracking
             content_hash = hashlib.sha256(content.strip().lower().encode("utf-8")).hexdigest()
-            version = self.url_history.get_version(url_str, content_hash)
+            version = self.url_history.get_version(self.target, url_str, content_hash)
 
             if version == -1:
                 # Same content as before, skip
@@ -578,7 +580,7 @@ class PasteScanner:
                 return result
 
             # Register this URL+hash
-            self.url_history.register(url_str, content_hash)
+            self.url_history.register(self.target, url_str, content_hash)
 
             # Deduplication check (global content dedup)
             if self.results.is_duplicate(content):
@@ -627,10 +629,10 @@ class PasteScanner:
                 if not self.history.is_mine(existing) and not self.results.is_duplicate(existing):
                     # V2 revision tracking for write mode too
                     content_hash = hashlib.sha256(existing.strip().lower().encode("utf-8")).hexdigest()
-                    version = self.url_history.get_version(url_str, content_hash)
+                    version = self.url_history.get_version(self.target, url_str, content_hash)
                     
                     if version != -1:
-                        self.url_history.register(url_str, content_hash)
+                        self.url_history.register(self.target, url_str, content_hash)
                         result["status"] = "hit+write"
                         result["content_len"] = len(existing)
                         result["content"] = existing
