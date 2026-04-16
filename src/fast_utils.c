@@ -12,7 +12,7 @@ static inline int is_foreign_cp(uint32_t cp) {
     if (cp >= 0x0E00 && cp <= 0x0E7F) return 1; // Tailandese
     if (cp >= 0x0590 && cp <= 0x05FF) return 1; // Ebraico
     if (cp >= 0x0900 && cp <= 0x097F) return 1; // Devanagari/Hindi
-    if (cp >= 0x0B80 && cp <= 0x0CFF) return 1; // Tamil/Telugu/ecc.
+    if (cp >= 0x0B80 && cp <= 0x0BFF) return 1; // Tamil
     return 0;
 }
 

@@ -102,12 +102,17 @@ FOREIGN_REGEX = re.compile(
     r'\u0E00-\u0E7F\u0590-\u05FF\u0900-\u097F\u0B80-\u0BFF]'
 )
 
-def is_foreign_content(text, threshold=3):
+def get_foreign_chars(text):
+    """Return all characters in the text that trigger the foreign filter."""
+    m = FOREIGN_REGEX.findall(text)
+    return "".join(m)
+
+def is_foreign_content(text, threshold=6):
     """C-compiled filter that bypasses GIL, thousands of times faster than regex."""
     if _ext_loaded:
         text_bytes = text.encode("utf-8", errors="ignore")
         return _fast.is_foreign_content(text_bytes, threshold) == 1
-        
+    
     count = 0
     for _ in FOREIGN_REGEX.finditer(text):
         count += 1
@@ -269,12 +274,13 @@ class ResultsWriter:
                 f.write(self._format_header() + "\n")
 
         # Foreign script filter
-        if is_foreign_content(content, threshold=3):
+        if is_foreign_content(content, threshold=6):
             self.record_skip("foreign")
             try:
+                foreign_chars = get_foreign_chars(content)
                 preview = content[:200].replace('\n', ' ')
                 with open(SKIP_DEBUG_FILE, "a", encoding="utf-8") as dbg:
-                    dbg.write(f"[FOREIGN] {full_url} | {preview}\n")
+                    dbg.write(f"[FOREIGN] {full_url} | Chars: {foreign_chars} | {preview}\n")
             except: pass
             return "foreign"
         
