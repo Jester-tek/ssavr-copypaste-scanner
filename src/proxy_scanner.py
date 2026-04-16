@@ -629,10 +629,24 @@ class PasteScanner:
                         result["status"] = "hit+write"
                         result["content_len"] = len(existing)
                         result["content"] = existing
-                        self.results.save(self.target, url_str, full_url, existing, version=version)
+                        self.results.save(self.target, url_str, full_url, existing, title=getattr(client, 'last_title', None), version=version)
                     else:
                         result["status"] = "occupied"
                 else:
+                    if self.history.is_mine(existing):
+                        result["status"] = "mine"
+                        try:
+                            preview = existing[:200].replace('\n', ' ')
+                            with open(SKIP_DEBUG_FILE, "a", encoding="utf-8") as dbg:
+                                dbg.write(f"[MINE] {full_url} | {preview}\n")
+                        except: pass
+                    else:
+                        result["status"] = "duplicate"
+                        try:
+                            preview = existing[:200].replace('\n', ' ')
+                            with open(SKIP_DEBUG_FILE, "a", encoding="utf-8") as dbg:
+                                dbg.write(f"[DUPLICATE] {full_url} | {preview}\n")
+                        except: pass
                     result["status"] = "occupied"
             else:
                 should_write = True
