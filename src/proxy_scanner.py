@@ -108,19 +108,25 @@ def get_foreign_chars(text):
     m = FOREIGN_REGEX.findall(text)
     return "".join(m)
 
+URL_STRIP_REGEX = re.compile(r'https?://\S+|www\.\S+|\S+\.com\S*|\S+\.net\S*|\S+\.org\S*|\S+\.it\S*|\S+\.co\S*')
+
 def is_foreign_content(text, threshold=50):
     """Ratio-based filter: skip only if more than threshold% of readable
     characters are in foreign scripts. This allows aesthetic bios with
     a few decorative kanji/symbols to pass through while blocking walls
     of Arabic/Russian/Chinese text.
     
+    URLs are stripped first so they don't inflate the Latin count.
     Uses C extension when available for speed, falls back to Python regex."""
+    # Strip URLs before analysis (they inflate Latin count)
+    clean = URL_STRIP_REGEX.sub('', text)
+    
     if _ext_loaded:
-        text_bytes = text.encode("utf-8", errors="ignore")
+        text_bytes = clean.encode("utf-8", errors="ignore")
         return _fast.is_foreign_content(text_bytes, threshold) == 1
     
-    foreign = len(FOREIGN_REGEX.findall(text))
-    latin = len(LATIN_REGEX.findall(text))
+    foreign = len(FOREIGN_REGEX.findall(clean))
+    latin = len(LATIN_REGEX.findall(clean))
     total = foreign + latin
     if total < 10:
         return False  # too short to judge
@@ -1086,6 +1092,30 @@ class PasteScanner:
                         if event & select.EPOLLHUP:
                             poller.unregister(fd)
                             active_fds.discard(fd)
+                    
+                    # Check if all subprocesses are dead (prevents infinite hang)
+                    all_dead = all(p.poll() is not None for p in procs.values())
+                    if all_dead:
+                        # Drain any remaining output
+                        for fd in list(active_fds):
+                            try:
+                                tgt, p, pipe_type = fd_to_tgt[fd]
+                                stream = p.stderr if pipe_type == 'stderr' else p.stdout
+                                while True:
+                                    line = stream.readline()
+                                    if not line:
+                                        break
+                                    try:
+                                        text = line.decode('utf-8')
+                                        if text.startswith("@@STATS@@"):
+                                            stats = json.loads(text[9:])
+                                            for k in stats:
+                                                if k in live_stats[tgt]:
+                                                    live_stats[tgt][k] = stats[k]
+                                    except: pass
+                                poller.unregister(fd)
+                            except: pass
+                        active_fds.clear()
                             
                     live.update(generate_table())
                     
