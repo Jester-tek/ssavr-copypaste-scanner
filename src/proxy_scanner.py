@@ -108,25 +108,19 @@ def get_foreign_chars(text):
     m = FOREIGN_REGEX.findall(text)
     return "".join(m)
 
-URL_STRIP_REGEX = re.compile(r'https?://\S+|www\.\S+|\S+\.com\S*|\S+\.net\S*|\S+\.org\S*|\S+\.it\S*|\S+\.co\S*')
-
 def is_foreign_content(text, threshold=50):
     """Ratio-based filter: skip only if more than threshold% of readable
     characters are in foreign scripts. This allows aesthetic bios with
     a few decorative kanji/symbols to pass through while blocking walls
     of Arabic/Russian/Chinese text.
     
-    URLs are stripped first so they don't inflate the Latin count.
     Uses C extension when available for speed, falls back to Python regex."""
-    # Strip URLs before analysis (they inflate Latin count)
-    clean = URL_STRIP_REGEX.sub('', text)
-    
     if _ext_loaded:
-        text_bytes = clean.encode("utf-8", errors="ignore")
+        text_bytes = text.encode("utf-8", errors="ignore")
         return _fast.is_foreign_content(text_bytes, threshold) == 1
     
-    foreign = len(FOREIGN_REGEX.findall(clean))
-    latin = len(LATIN_REGEX.findall(clean))
+    foreign = len(FOREIGN_REGEX.findall(text))
+    latin = len(LATIN_REGEX.findall(text))
     total = foreign + latin
     if total < 10:
         return False  # too short to judge
