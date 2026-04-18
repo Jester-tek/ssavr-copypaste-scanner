@@ -1047,9 +1047,15 @@ class PasteScanner:
                 
             try:
                 active_fds = set(fd_to_tgt.keys())
+                last_progress = time.time()
+                prev_totals = {tgt: 0 for tgt in procs}
+                STALE_TIMEOUT = 120  # seconds with zero progress before killing
+                
                 while active_fds:
                     events = poller.poll(0.5)
                     for fd, event in events:
+                        if fd not in fd_to_tgt:
+                            continue
                         tgt, p, pipe_type = fd_to_tgt[fd]
                         if event & select.EPOLLIN:
                             stream = p.stderr if pipe_type == 'stderr' else p.stdout
@@ -1083,33 +1089,56 @@ class PasteScanner:
                                             sys.__stdout__.write(text_str.encode('ascii', 'ignore').decode('ascii') + '\n')
                                             sys.__stdout__.flush()
                                         
-                        if event & select.EPOLLHUP:
-                            poller.unregister(fd)
+                        if event & (select.EPOLLHUP | select.EPOLLERR):
+                            try: poller.unregister(fd)
+                            except: pass
                             active_fds.discard(fd)
                     
-                    # Check if all subprocesses are dead (prevents infinite hang)
-                    all_dead = all(p.poll() is not None for p in procs.values())
-                    if all_dead:
-                        # Drain any remaining output
-                        for fd in list(active_fds):
-                            try:
-                                tgt, p, pipe_type = fd_to_tgt[fd]
-                                stream = p.stderr if pipe_type == 'stderr' else p.stdout
-                                while True:
-                                    line = stream.readline()
-                                    if not line:
-                                        break
-                                    try:
-                                        text = line.decode('utf-8')
-                                        if text.startswith("@@STATS@@"):
-                                            stats = json.loads(text[9:])
-                                            for k in stats:
-                                                if k in live_stats[tgt]:
-                                                    live_stats[tgt][k] = stats[k]
-                                    except: pass
-                                poller.unregister(fd)
+                    # Track progress: if any site's checked count changed, reset timer
+                    current_totals = {tgt: live_stats[tgt].get("checked", 0) for tgt in procs}
+                    if current_totals != prev_totals:
+                        last_progress = time.time()
+                        prev_totals = current_totals
+                    
+                    # Per-process death: clean up dead process fds individually
+                    for tgt, p in list(procs.items()):
+                        if p.poll() is not None:
+                            # Process died, clean up its fds
+                            dead_fds = [fd for fd, (t, proc, _) in fd_to_tgt.items() if t == tgt and fd in active_fds]
+                            for fd in dead_fds:
+                                try:
+                                    # Drain remaining
+                                    stream = p.stderr if fd_to_tgt[fd][2] == 'stderr' else p.stdout
+                                    while True:
+                                        line = stream.readline()
+                                        if not line: break
+                                        try:
+                                            text = line.decode('utf-8')
+                                            if text.startswith("@@STATS@@"):
+                                                stats = json.loads(text[9:])
+                                                for k in stats:
+                                                    if k in live_stats[tgt]:
+                                                        live_stats[tgt][k] = stats[k]
+                                        except: pass
+                                    poller.unregister(fd)
+                                except: pass
+                                active_fds.discard(fd)
+                            rc = p.returncode
+                            if rc != 0:
+                                try:
+                                    live.console.print(f"  ⚠️  {tgt} process exited with code {rc}", style="bold yellow")
+                                except: pass
+                    
+                    # Stale timeout: no progress across ALL sites for 120s
+                    if time.time() - last_progress > STALE_TIMEOUT:
+                        try:
+                            live.console.print(f"\n  ⏰ No progress for {STALE_TIMEOUT}s, shutting down stale processes...", style="bold yellow")
+                        except: pass
+                        for p in procs.values():
+                            try: p.kill()
                             except: pass
                         active_fds.clear()
+                        break
                             
                     live.update(generate_table())
                     
