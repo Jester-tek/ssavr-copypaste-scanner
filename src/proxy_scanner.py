@@ -528,6 +528,7 @@ class PasteScanner:
             def proxy_session():
                 s = __import__("requests").Session()
                 s.proxies = proxy_dict
+                s.timeout = 10  # Safety net: default timeout for all requests through proxy
                 return s
 
             client.reset_session()
@@ -849,6 +850,12 @@ class PasteScanner:
         """Main execution loop."""
         if self.target == "all":
             return self._run_all_supervisor()
+        
+        # Hard socket-level timeout: catches SOCKS proxy hangs that
+        # requests' timeout parameter cannot reach (e.g. proxy accepts
+        # TCP but never completes SOCKS handshake)
+        import socket
+        socket.setdefaulttimeout(30)
             
         if self.using_proxies:
             print(f"  ⚠️  {self.target} configured for IP protection: Proxies forced")
