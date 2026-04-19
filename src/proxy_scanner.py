@@ -888,7 +888,7 @@ class PasteScanner:
                 futures = {executor.submit(self._process_url, idx): idx for idx in batch}
                 
                 try:
-                    for future in as_completed(futures):
+                    for future in as_completed(futures, timeout=90):
                         if not self.running:
                             break
                         try:
@@ -934,14 +934,20 @@ class PasteScanner:
                                 self.stats["errors"] += 1
                             else:
                                 self.stats["errors"] += 1
+                except TimeoutError:
+                    # Batch took too long - some threads are stuck on dead proxies
+                    stuck = sum(1 for f in futures if not f.done())
+                    if not self.quiet_ui:
+                        print(f"  ⏰ Batch timeout! {stuck} stuck threads, cancelling...")
+                    for f in futures:
+                        f.cancel()
+                    with self.stats_lock:
+                        self.stats["errors"] += stuck
                 finally:
-                    if not self.running:
-                        try:
-                            executor.shutdown(wait=False, cancel_futures=True)
-                        except TypeError:
-                            executor.shutdown(wait=False)
-                    else:
-                        executor.shutdown(wait=True)
+                    try:
+                        executor.shutdown(wait=False, cancel_futures=True)
+                    except TypeError:
+                        executor.shutdown(wait=False)
 
                 self.current_idx += len(batch)
 
