@@ -1066,6 +1066,7 @@ class PasteScanner:
                 stats_received = {tgt: 0 for tgt in procs}  # count @@STATS@@ messages
                 last_heartbeat = time.time()
                 loop_count = 0
+                fd_buffers = {fd: bytearray() for fd in fd_to_tgt}
                 
                 dbg_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "supervisor_debug.txt")
                 def dbg(msg):
@@ -1085,19 +1086,21 @@ class PasteScanner:
                             continue
                         tgt, p, pipe_type = fd_to_tgt[fd]
                         if event & select.EPOLLIN:
-                            stream = p.stderr if pipe_type == 'stderr' else p.stdout
                             while True:
                                 try:
-                                    line = stream.readline()
+                                    chunk = os.read(fd, 4096)
+                                    if not chunk:
+                                        break
+                                    fd_buffers[fd].extend(chunk)
                                 except (BlockingIOError, OSError):
                                     break
-                                if not line:
-                                    break
-                                try:
-                                    text = line.decode('utf-8')
-                                except UnicodeDecodeError:
-                                    continue
                                     
+                            while b'\n' in fd_buffers[fd]:
+                                line_end = fd_buffers[fd].index(b'\n')
+                                line_b = fd_buffers[fd][:line_end]
+                                del fd_buffers[fd][:line_end+1]
+                                
+                                text = line_b.decode('utf-8', errors='replace')
                                 if text.startswith("@@STATS@@"):
                                     try:
                                         stats = json.loads(text[9:])
@@ -1112,7 +1115,7 @@ class PasteScanner:
                                         stats_received[tgt] += 1
                                     except: pass
                                 else:
-                                    text_str = text.rstrip('\n')
+                                    text_str = text.strip('\r')
                                     if text_str:
                                         try:
                                             live.console.print(text_str, markup=False, highlight=False)
@@ -1140,21 +1143,28 @@ class PasteScanner:
                                 dbg(f"DEAD: {tgt} rc={p.returncode} cleaning {len(dead_fds)} fds")
                             for fd in dead_fds:
                                 try:
-                                    stream = p.stderr if fd_to_tgt[fd][2] == 'stderr' else p.stdout
                                     while True:
-                                        line = stream.readline()
-                                        if not line: break
                                         try:
-                                            text = line.decode('utf-8')
-                                            if text.startswith("@@STATS@@"):
+                                            chunk = os.read(fd, 4096)
+                                            if not chunk: break
+                                            fd_buffers[fd].extend(chunk)
+                                        except OSError: break
+                                    while b'\n' in fd_buffers[fd]:
+                                        line_end = fd_buffers[fd].index(b'\n')
+                                        line_b = fd_buffers[fd][:line_end]
+                                        del fd_buffers[fd][:line_end+1]
+                                        text = line_b.decode('utf-8', errors='replace')
+                                        if text.startswith("@@STATS@@"):
+                                            try:
                                                 stats = json.loads(text[9:])
                                                 for k in stats:
                                                     if k in live_stats[tgt]:
                                                         live_stats[tgt][k] = stats[k]
-                                        except: pass
+                                            except: pass
                                     poller.unregister(fd)
                                 except: pass
                                 active_fds.discard(fd)
+                                fd_buffers.pop(fd, None)
                             rc = p.returncode
                             if rc != 0 and dead_fds:
                                 try:
