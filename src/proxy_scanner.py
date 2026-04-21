@@ -553,7 +553,7 @@ class PasteScanner:
 
     def _process_read(self, client, url_str, full_url, result):
         """Read-only mode: check if URL has content with auto-retry on proxy fails."""
-        max_retries = 15
+        max_retries = 3
         
         for attempt in range(max_retries):
             content = client.read(url_str)
@@ -623,7 +623,7 @@ class PasteScanner:
 
     def _process_write(self, client, url_str, full_url, result):
         """Write mode: check first, save if content exists, then write with auto-retry."""
-        max_retries = 15
+        max_retries = 3
         
         for attempt in range(max_retries):
             existing = client.read(url_str)
@@ -945,11 +945,20 @@ class PasteScanner:
                     # Batch took too long - some threads are stuck on dead proxies
                     stuck = sum(1 for f in futures if not f.done())
                     if not self.quiet_ui:
-                        print(f"  ⏰ Batch timeout! {stuck} stuck threads, cancelling...")
+                        print(f"  ⏰ Batch timeout! {stuck}/{self.workers} stuck threads, recycling executor...")
                     for f in futures:
                         f.cancel()
                     with self.stats_lock:
                         self.stats["errors"] += stuck
+                    # Kill the old executor and create a fresh one.
+                    # cancel() cannot stop already-running threads, so stuck
+                    # threads would permanently fill the pool. A fresh executor
+                    # guarantees all slots are free for the next batch.
+                    try:
+                        executor.shutdown(wait=False, cancel_futures=True)
+                    except TypeError:
+                        executor.shutdown(wait=False)
+                    executor = ThreadPoolExecutor(max_workers=self.workers)
                 finally:
                     pass
 
