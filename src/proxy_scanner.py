@@ -895,7 +895,7 @@ class PasteScanner:
                 futures = {executor.submit(self._process_url, idx): idx for idx in batch}
                 
                 try:
-                    for future in as_completed(futures, timeout=90):
+                    for future in as_completed(futures, timeout=35):
                         if not self.running:
                             break
                         try:
@@ -1062,7 +1062,7 @@ class PasteScanner:
                 active_fds = set(fd_to_tgt.keys())
                 last_progress = time.time()
                 prev_totals = {tgt: 0 for tgt in procs}
-                STALE_TIMEOUT = 60  # seconds with zero progress before killing
+                STALE_TIMEOUT = 120  # seconds with zero progress before killing
                 stats_received = {tgt: 0 for tgt in procs}  # count @@STATS@@ messages
                 last_heartbeat = time.time()
                 loop_count = 0
