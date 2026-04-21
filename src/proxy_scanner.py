@@ -875,6 +875,7 @@ class PasteScanner:
             import threading
             threading.Thread(target=_stats_emitter, daemon=True).start()
 
+        executor = ThreadPoolExecutor(max_workers=self.workers)
         try:
             while self.running:
                 if rate_limit_cooldown > 0:
@@ -891,7 +892,6 @@ class PasteScanner:
 
                 batch = list(range(self.current_idx, self.current_idx + self.workers))
 
-                executor = ThreadPoolExecutor(max_workers=self.workers)
                 futures = {executor.submit(self._process_url, idx): idx for idx in batch}
                 
                 try:
@@ -951,10 +951,7 @@ class PasteScanner:
                     with self.stats_lock:
                         self.stats["errors"] += stuck
                 finally:
-                    try:
-                        executor.shutdown(wait=False, cancel_futures=True)
-                    except TypeError:
-                        executor.shutdown(wait=False)
+                    pass
 
                 self.current_idx += len(batch)
 
@@ -979,6 +976,11 @@ class PasteScanner:
         if not self.quiet_ui:
             self._print_report()
             print("  💾 State saved. Restart to continue where you left off.\n")
+        
+        try:
+            executor.shutdown(wait=False, cancel_futures=True)
+        except TypeError:
+            executor.shutdown(wait=False)
 
     def _run_all_supervisor(self):
         """Run all sites concurrently using subprocesses and rich.Live UI."""
