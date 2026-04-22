@@ -378,7 +378,7 @@ class PasteScanner:
             self.api_token = getattr(config, 'CL1P_API_TOKEN', "")
             
         if self.target == "cl1p":
-            self.workers = 200
+            self.workers = 100
             self.using_proxies = False
             self.site_timeout = 3  # Direct API, no proxy overhead
         elif self.target == "rentry":
@@ -481,7 +481,7 @@ class PasteScanner:
         
         # Persist retry queue so failed URLs survive restarts
         retry_key = f"{self.target}_{self.mode}_retry"
-        self.state[retry_key] = list(getattr(self, 'retry_queue', []))[:5000]  # cap at 5000 to prevent bloat
+        self.state[retry_key] = list(getattr(self, 'retry_queue', []))
         
         STATE_FILE.parent.mkdir(exist_ok=True)
         with open(STATE_FILE, "w") as f:
@@ -887,7 +887,8 @@ class PasteScanner:
                 futures = {executor.submit(self._process_url, idx): idx for idx in batch}
                 
                 try:
-                    for future in as_completed(futures, timeout=15):
+                    batch_timeout = (self.site_timeout + 2) * 2 + 5
+                    for future in as_completed(futures, timeout=batch_timeout):
                         if not self.running:
                             break
                         try:
