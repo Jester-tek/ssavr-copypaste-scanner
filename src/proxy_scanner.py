@@ -378,14 +378,17 @@ class PasteScanner:
             self.api_token = getattr(config, 'CL1P_API_TOKEN', "")
             
         if self.target == "cl1p":
-            self.workers = 100
+            self.workers = 500
             self.using_proxies = False
+            self.site_timeout = 3  # Direct API, no proxy overhead
         elif self.target == "rentry":
             self.workers = config.MOD2_PROXY_THREAD_COUNT
             self.using_proxies = True
-        else:
+            self.site_timeout = 8  # Extra time for SOCKS proxy handshake
+        else:  # justpaste
             self.workers = config.MOD2_PROXY_THREAD_COUNT
             self.using_proxies = True
+            self.site_timeout = 8  # Extra time for SOCKS proxy handshake
 
         self.running = True
 
@@ -822,7 +825,10 @@ class PasteScanner:
         # requests' timeout parameter cannot reach (e.g. proxy accepts
         # TCP but never completes SOCKS handshake)
         import socket
-        socket.setdefaulttimeout(10)
+        socket.setdefaulttimeout(self.site_timeout + 2)  # slightly above request timeout
+        
+        # Override global timeout so all client libraries use per-site value
+        config.SITE_READ_TIMEOUT = self.site_timeout
             
         if self.using_proxies:
             print(f"  ⚠️  {self.target} configured for IP protection: Proxies forced")
