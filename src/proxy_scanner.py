@@ -887,8 +887,7 @@ class PasteScanner:
                 futures = {executor.submit(self._process_url, idx): idx for idx in batch}
                 
                 try:
-                    batch_timeout = (self.site_timeout + 2) * 2 + 5
-                    for future in as_completed(futures, timeout=batch_timeout):
+                    for future in as_completed(futures, timeout=15):
                         if not self.running:
                             break
                         try:
