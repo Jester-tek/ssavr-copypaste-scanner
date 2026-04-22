@@ -28,7 +28,7 @@ from src import config, utils
 
 # ─── Constants ────────────────────────────────────────────────────────────────
 
-SKIP_DEBUG_FILE = Path(config.DATA_DIR) / "skip_debug.txt"
+
 
 VERSION = "1.1.0"
 CHARSET = "abcdefghijklmnopqrstuvwxyz0123456789"
@@ -282,12 +282,6 @@ class ResultsWriter:
         # Foreign script filter (ratio-based: skip if >50% foreign)
         if is_foreign_content(content, threshold=50):
             self.record_skip("foreign")
-            try:
-                foreign_chars = get_foreign_chars(content)
-                preview = content[:200].replace('\n', ' ')
-                with open(SKIP_DEBUG_FILE, "a", encoding="utf-8") as dbg:
-                    dbg.write(f"[FOREIGN] {full_url} | Chars: {foreign_chars[:30]} | {preview}\n")
-            except: pass
             return "foreign"
         
         h = self._hash(content)
@@ -571,11 +565,6 @@ class PasteScanner:
 
             if self.history.is_mine(content):
                 result["status"] = "mine"
-                try:
-                    preview = content[:200].replace('\n', ' ')
-                    with open(SKIP_DEBUG_FILE, "a", encoding="utf-8") as dbg:
-                        dbg.write(f"[MINE] {full_url} | {preview}\n")
-                except: pass
                 return result
 
             # V2 revision tracking
@@ -583,32 +572,21 @@ class PasteScanner:
             version = self.url_history.get_version(self.target, url_str, content_hash)
 
             if version == -1:
-                # Same content as before, skip
                 result["status"] = "duplicate"
-                try:
-                    preview = content[:200].replace('\n', ' ')
-                    with open(SKIP_DEBUG_FILE, "a", encoding="utf-8") as dbg:
-                        dbg.write(f"[ALREADY_SEEN_ON_URL] {full_url} | {preview}\n")
-                except: pass
                 return result
 
             # Register this URL+hash
             self.url_history.register(self.target, url_str, content_hash)
 
-            # Deduplication check (global content dedup)
             if self.results.is_duplicate(content):
                 self.results.record_skip("duplicate")
-                try:
-                    preview = content[:200].replace('\n', ' ')
-                    with open(SKIP_DEBUG_FILE, "a", encoding="utf-8") as dbg:
-                        dbg.write(f"[DUPLICATE] {full_url} | {preview}\n")
-                except: pass
                 result["status"] = "duplicate"
                 return result
 
             result["status"] = "hit"
             result["content_len"] = len(content)
-            result["content"] = content
+            if not self.quiet_ui:
+                result["content"] = content
 
             title = getattr(client, 'last_title', None)
             save_result = self.results.save(self.target, url_str, full_url, content, title, version=version)
@@ -652,26 +630,11 @@ class PasteScanner:
                         self.results.save(self.target, url_str, full_url, existing, title=getattr(client, 'last_title', None), version=version)
                     else:
                         result["status"] = "occupied"
-                        try:
-                            preview = existing[:200].replace('\n', ' ')
-                            with open(SKIP_DEBUG_FILE, "a", encoding="utf-8") as dbg:
-                                dbg.write(f"[ALREADY_SEEN_ON_URL] {full_url} | {preview}\n")
-                        except: pass
                 else:
                     if self.history.is_mine(existing):
                         result["status"] = "mine"
-                        try:
-                            preview = existing[:200].replace('\n', ' ')
-                            with open(SKIP_DEBUG_FILE, "a", encoding="utf-8") as dbg:
-                                dbg.write(f"[MINE] {full_url} | {preview}\n")
-                        except: pass
                     else:
                         result["status"] = "duplicate"
-                        try:
-                            preview = existing[:200].replace('\n', ' ')
-                            with open(SKIP_DEBUG_FILE, "a", encoding="utf-8") as dbg:
-                                dbg.write(f"[DUPLICATE] {full_url} | {preview}\n")
-                        except: pass
                     result["status"] = "occupied"
             else:
                 should_write = True
@@ -682,8 +645,7 @@ class PasteScanner:
                     wrote = client.write(url_str, utils.normalize_text_output(self.write_msg))
                     if wrote is True:
                         # Verify write by re-reading
-                        import time as _t
-                        _t.sleep(0.3)
+                        time.sleep(0.3)
                         verify = client.read(url_str)
                         if verify and self.write_msg[:30] in verify:
                             if result.get("status") != "hit+write":
@@ -891,9 +853,7 @@ class PasteScanner:
                     rate_limit_cooldown -= 1
                     continue
                 
-                # Try to batch print queue if 2 seconds passed
-                if hasattr(self, '_flush_print_batch'):
-                    self._flush_print_batch()
+                self._flush_print_batch()
 
                 batch = list(range(self.current_idx, self.current_idx + self.workers))
 
@@ -964,8 +924,7 @@ class PasteScanner:
                     except TypeError:
                         executor.shutdown(wait=False)
                     executor = ThreadPoolExecutor(max_workers=self.workers)
-                finally:
-                    pass
+
 
                 self.current_idx += len(batch)
 
