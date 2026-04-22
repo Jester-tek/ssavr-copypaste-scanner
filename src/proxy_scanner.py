@@ -765,32 +765,33 @@ class PasteScanner:
 
     def _print_hit(self, url_str, content_len, content="", is_write_hit=False, is_revision=False):
         """Print to screen when something is found."""
-        if not self.quiet_ui:
-            sys.stdout.write(f"\r{' '*100}\r")
-        
         if is_revision:
-            icon = "📝"
-            tag = "REVISION"
+            icon = "📝"; tag = "REVISION"
         elif is_write_hit:
-            icon = "🎯"
-            tag = "SAVED (occupied)"
+            icon = "🎯"; tag = "SAVED"
         else:
-            icon = "✨"
-            tag = "FOUND!"
+            icon = "✨"; tag = "FOUND!"
         
         clean_url = f"{self.site_url.replace('https://', '')}/{url_str}"
-        print(f"  {icon} {tag} {clean_url}")
         
+        if self.quiet_ui:
+            # Child process mode: minimal output to prevent pipe saturation
+            sys.stdout.write(f"  {icon} {tag} {clean_url}\n")
+            sys.stdout.flush()
+            return
+        
+        # Interactive mode: show content preview
+        sys.stdout.write(f"\r{' '*100}\r")
+        out = f"  {icon} {tag} {clean_url}\n"
         if content:
-            print("     " + "─"*50)
+            out += "     " + "─"*50 + "\n"
             lines = content.split('\n')
-            
-            for line in lines[:40]:
-                print(f"     | {line.strip()}")
-            
-            if len(lines) > 40:
-                print(f"     | ... [{len(lines)-40} more lines omitted, see .txt file]")
-            print()
+            for line in lines[:5]:
+                out += f"     | {line.strip()}\n"
+            if len(lines) > 5:
+                out += f"     | ... [{len(lines)-5} more lines, see .txt file]\n"
+        sys.stdout.write(out)
+        sys.stdout.flush()
 
     def _print_wrote_batched(self, message):
         """Batch pushing to UI array to be flushed independently, drastically reducing I/O lock up."""
@@ -801,13 +802,17 @@ class PasteScanner:
 
     def _flush_print_batch(self):
         """Flush the saved prints array every 2 seconds to terminal to conserve CPU."""
+        if self.quiet_ui:
+            if hasattr(self, '_print_batch'):
+                self._print_batch.clear()
+            return
         if hasattr(self, '_print_batch') and self._print_batch:
             if time.time() - self._last_batch_time >= 2.0:
-                if not self.quiet_ui:
-                    sys.stdout.write(f"\r{' '*100}\r")
+                sys.stdout.write(f"\r{' '*100}\r")
                 for msg in self._print_batch:
-                    print(msg)
-                print()
+                    sys.stdout.write(msg + "\n")
+                sys.stdout.write("\n")
+                sys.stdout.flush()
                 self._print_batch.clear()
                 self._last_batch_time = time.time()
 
@@ -1024,7 +1029,7 @@ class PasteScanner:
                 if getattr(self.args, 'write_file', None): cmd.extend(["-wf", self.args.write_file])
                 elif getattr(self.args, 'write', None): cmd.extend(["-w", self.args.write])
                 
-            procs[tgt] = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            procs[tgt] = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=1048576)
 
         def generate_table():
             table = Table(title="Live Scanner Performance", style="cyan")
@@ -1085,7 +1090,7 @@ class PasteScanner:
                         if event & select.EPOLLIN:
                             while True:
                                 try:
-                                    chunk = os.read(fd, 4096)
+                                    chunk = os.read(fd, 65536)
                                     if not chunk:
                                         break
                                     fd_buffers[fd].extend(chunk)
