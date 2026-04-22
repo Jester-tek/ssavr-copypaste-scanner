@@ -378,7 +378,7 @@ class PasteScanner:
             self.api_token = getattr(config, 'CL1P_API_TOKEN', "")
             
         if self.target == "cl1p":
-            self.workers = 500
+            self.workers = 200
             self.using_proxies = False
             self.site_timeout = 3  # Direct API, no proxy overhead
         elif self.target == "rentry":
@@ -463,14 +463,26 @@ class PasteScanner:
         if STATE_FILE.exists():
             try:
                 with open(STATE_FILE, "r") as f:
-                    return json.load(f)
+                    data = json.load(f)
+                # Load retry queue if it exists for this target
+                retry_key = f"{self.target}_{self.mode}_retry"
+                self.retry_queue = data.get(retry_key, [])
+                if self.retry_queue and not self.quiet_ui:
+                    print(f"  🔄 Loaded {len(self.retry_queue)} URLs from retry queue")
+                return data
             except:
                 pass
+        self.retry_queue = []
         return {}
 
     def _save_state(self):
         state_key = f"{self.target}_{self.mode}"
         self.state[state_key] = self.current_idx
+        
+        # Persist retry queue so failed URLs survive restarts
+        retry_key = f"{self.target}_{self.mode}_retry"
+        self.state[retry_key] = list(getattr(self, 'retry_queue', []))[:5000]  # cap at 5000 to prevent bloat
+        
         STATE_FILE.parent.mkdir(exist_ok=True)
         with open(STATE_FILE, "w") as f:
             json.dump(self.state, f, indent=2)
@@ -1016,7 +1028,7 @@ class PasteScanner:
             table.add_column("Hits Found", justify="center", style="green")
             table.add_column("Written OK", justify="center", style="yellow")
             table.add_column("Empty/404", justify="center", style="dim white")
-            table.add_column("Skipped", justify="center", style="dim yellow")
+            table.add_column("Filtered", justify="center", style="dim yellow")
             table.add_column("Errors", justify="center", style="red")
             for tgt in ["cl1p", "justpaste", "rentry"]:
                 s = live_stats[tgt]
