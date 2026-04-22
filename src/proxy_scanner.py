@@ -547,7 +547,7 @@ class PasteScanner:
 
     def _process_read(self, client, url_str, full_url, result):
         """Read-only mode: check if URL has content with auto-retry on proxy fails."""
-        max_retries = 3
+        max_retries = 2
         
         for attempt in range(max_retries):
             content = client.read(url_str)
@@ -601,7 +601,7 @@ class PasteScanner:
 
     def _process_write(self, client, url_str, full_url, result):
         """Write mode: check first, save if content exists, then write with auto-retry."""
-        max_retries = 3
+        max_retries = 2
         
         for attempt in range(max_retries):
             existing = client.read(url_str)
@@ -860,7 +860,7 @@ class PasteScanner:
                 futures = {executor.submit(self._process_url, idx): idx for idx in batch}
                 
                 try:
-                    for future in as_completed(futures, timeout=20):
+                    for future in as_completed(futures, timeout=15):
                         if not self.running:
                             break
                         try:
