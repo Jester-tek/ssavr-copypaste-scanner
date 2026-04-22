@@ -657,12 +657,17 @@ class PasteScanner:
             # Write our message
             if should_write:
                 if self.target == "cl1p":
-                    wrote = client.write(url_str, utils.normalize_text_output(self.write_msg))
+                    content_to_write = utils.normalize_text_output(self.write_msg)
+                    wrote = client.write(url_str, content_to_write)
+                    # cl1p API rejects bodies > ~940 chars with 400
+                    if wrote == 'too_long' and len(content_to_write) > 900:
+                        content_to_write = content_to_write[:900].rsplit('\n', 1)[0]
+                        wrote = client.write(url_str, content_to_write)
                     if wrote is True:
                         # Verify write by re-reading
                         time.sleep(0.3)
                         verify = client.read(url_str)
-                        if verify and self.write_msg[:30] in verify:
+                        if verify and content_to_write[:30] in verify:
                             if result.get("status") != "hit+write":
                                 result["status"] = "wrote"
                         else:
