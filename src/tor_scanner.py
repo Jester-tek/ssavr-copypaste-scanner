@@ -540,8 +540,8 @@ class ScannerApp:
             
             split_display.proxy_total = len(self.proxy_manager.proxies_list)
             
-            self.proxy_executor = ThreadPoolExecutor(max_workers=config.PROXY_THREAD_COUNT)
-            for _ in range(config.PROXY_THREAD_COUNT):
+            self.proxy_executor = ThreadPoolExecutor(max_workers=config.MOD1_PROXY_THREAD_COUNT)
+            for _ in range(config.MOD1_PROXY_THREAD_COUNT):
                 self.proxy_executor.submit(self._proxy_worker, w_ssavr, w_cp, w_af, split_display)
         
         split_display.start()

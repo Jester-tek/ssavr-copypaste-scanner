@@ -99,7 +99,8 @@ PROXY_SOURCES = [
     "https://raw.githubusercontent.com/roosterkid/openproxylist/main/SOCKS5_RAW.txt",
     "https://raw.githubusercontent.com/roosterkid/openproxylist/main/HTTPS_RAW.txt",
 ]
-PROXY_THREAD_COUNT = 1000 # Number of concurrent proxy requests
+MOD1_PROXY_THREAD_COUNT = 300  # Mod1 (Tor/IP Rotation): Lower count to preserve proxy pool and prioritize IP variety
+MOD2_PROXY_THREAD_COUNT = 1000 # Mod2 (Brute-Forcer): Extreme throughput for checking massive sequential URLs
 PROXY_CONNECT_TIMEOUT = 12 # Seconds to wait for a free proxy to connect
 
 def load_config():

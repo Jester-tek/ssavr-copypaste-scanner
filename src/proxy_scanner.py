@@ -381,10 +381,10 @@ class PasteScanner:
             self.workers = 100
             self.using_proxies = False
         elif self.target == "rentry":
-            self.workers = 1200
+            self.workers = config.MOD2_PROXY_THREAD_COUNT
             self.using_proxies = True
         else:
-            self.workers = 1200
+            self.workers = config.MOD2_PROXY_THREAD_COUNT
             self.using_proxies = True
 
         self.running = True
