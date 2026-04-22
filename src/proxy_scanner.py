@@ -822,7 +822,7 @@ class PasteScanner:
         # requests' timeout parameter cannot reach (e.g. proxy accepts
         # TCP but never completes SOCKS handshake)
         import socket
-        socket.setdefaulttimeout(5)
+        socket.setdefaulttimeout(10)
             
         if self.using_proxies:
             print(f"  ⚠️  {self.target} configured for IP protection: Proxies forced")
@@ -855,7 +855,16 @@ class PasteScanner:
                 
                 self._flush_print_batch()
 
-                batch = list(range(self.current_idx, self.current_idx + self.workers))
+                batch = []
+                # First, fill the batch with URLs that previously failed
+                while getattr(self, 'retry_queue', []) and len(batch) < self.workers:
+                    batch.append(self.retry_queue.pop(0))
+                
+                # Then fill the rest with new URLs
+                needed = self.workers - len(batch)
+                if needed > 0:
+                    batch.extend(list(range(self.current_idx, self.current_idx + needed)))
+                    self.current_idx += needed
 
                 futures = {executor.submit(self._process_url, idx): idx for idx in batch}
                 
@@ -898,20 +907,23 @@ class PasteScanner:
                                 self.stats["foreign_skipped"] += 1
                             elif r["status"] == "mine":
                                 self.stats["skipped_mine"] += 1
-                            elif r["status"] == "error":
-                                self.stats["errors"] += 1
-                            elif r["status"] == "error_write":
-                                self.stats["empty"] += 1
-                            elif r["status"] == "rate_limit":
+                            elif r["status"] in ["error", "rate_limit"]:
+                                if not hasattr(self, 'retry_queue'): self.retry_queue = []
+                                self.retry_queue.append(r["idx"])
                                 self.stats["errors"] += 1
                             else:
+                                if not hasattr(self, 'retry_queue'): self.retry_queue = []
+                                self.retry_queue.append(r["idx"])
                                 self.stats["errors"] += 1
                 except TimeoutError:
-                    # Batch took too long - some threads are stuck on dead proxies
+                    # Batch took too long - some threads are stuck
                     stuck = sum(1 for f in futures if not f.done())
                     if not self.quiet_ui:
                         print(f"  ⏰ Batch timeout! {stuck}/{self.workers} stuck threads, recycling executor...")
                     for f in futures:
+                        if not f.done():
+                            if not hasattr(self, 'retry_queue'): self.retry_queue = []
+                            self.retry_queue.append(futures[f])
                         f.cancel()
                     with self.stats_lock:
                         self.stats["errors"] += stuck
@@ -925,11 +937,12 @@ class PasteScanner:
                         executor.shutdown(wait=False)
                     executor = ThreadPoolExecutor(max_workers=self.workers)
 
-
-                self.current_idx += len(batch)
-
-                last_url = index_to_string(batch[-1])
-                self._print_status_line(last_url)
+                last_url = index_to_string(batch[-1] if batch else self.current_idx)
+                
+                # Show retry queue size in status if it exists
+                q_size = len(getattr(self, 'retry_queue', []))
+                status_suffix = f" (Retrying {q_size})" if q_size > 0 else ""
+                self._print_status_line(last_url + status_suffix)
 
                 # Auto-save every 200 checks
                 if self.stats["checked"] % 200 == 0:
