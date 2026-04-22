@@ -528,7 +528,7 @@ class PasteScanner:
             def proxy_session():
                 s = __import__("requests").Session()
                 s.proxies = proxy_dict
-                s.timeout = 10  # Safety net: default timeout for all requests through proxy
+                s.timeout = 5  # Safety net: default timeout for all requests through proxy
                 return s
 
             client.reset_session()
@@ -855,7 +855,7 @@ class PasteScanner:
         # requests' timeout parameter cannot reach (e.g. proxy accepts
         # TCP but never completes SOCKS handshake)
         import socket
-        socket.setdefaulttimeout(30)
+        socket.setdefaulttimeout(5)
             
         if self.using_proxies:
             print(f"  ⚠️  {self.target} configured for IP protection: Proxies forced")
@@ -895,7 +895,7 @@ class PasteScanner:
                 futures = {executor.submit(self._process_url, idx): idx for idx in batch}
                 
                 try:
-                    for future in as_completed(futures, timeout=35):
+                    for future in as_completed(futures, timeout=20):
                         if not self.running:
                             break
                         try:
@@ -1073,24 +1073,10 @@ class PasteScanner:
                 active_fds = set(fd_to_tgt.keys())
                 last_progress = time.time()
                 prev_totals = {tgt: 0 for tgt in procs}
-                STALE_TIMEOUT = 120  # seconds with zero progress before killing
-                stats_received = {tgt: 0 for tgt in procs}  # count @@STATS@@ messages
-                last_heartbeat = time.time()
-                loop_count = 0
+                STALE_TIMEOUT = 120
                 fd_buffers = {fd: bytearray() for fd in fd_to_tgt}
                 
-                dbg_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "supervisor_debug.txt")
-                def dbg(msg):
-                    ts = time.strftime("%H:%M:%S")
-                    try:
-                        with open(dbg_path, "a") as f:
-                            f.write(f"[{ts}] {msg}\n")
-                    except: pass
-                
-                dbg(f"=== SUPERVISOR START === active_fds={len(active_fds)} stale_timeout={STALE_TIMEOUT}s")
-                
                 while active_fds:
-                    loop_count += 1
                     events = poller.poll(0.5)
                     for fd, event in events:
                         if fd not in fd_to_tgt:
@@ -1123,7 +1109,6 @@ class PasteScanner:
                                         live_stats[tgt]["duplicates"] = stats.get("duplicates", 0)
                                         live_stats[tgt]["foreign_skipped"] = stats.get("foreign_skipped", 0)
                                         live_stats[tgt]["skipped_mine"] = stats.get("skipped_mine", 0)
-                                        stats_received[tgt] += 1
                                     except: pass
                                 else:
                                     text_str = text.strip('\r')
@@ -1135,23 +1120,20 @@ class PasteScanner:
                                             sys.__stdout__.flush()
                                         
                         if event & (select.EPOLLHUP | select.EPOLLERR):
-                            dbg(f"EPOLLHUP/ERR on fd={fd} tgt={tgt} pipe={pipe_type}")
                             try: poller.unregister(fd)
                             except: pass
                             active_fds.discard(fd)
                     
-                    # Track progress: if any site's checked count changed, reset timer
+                    # Track progress
                     current_totals = {tgt: live_stats[tgt].get("checked", 0) for tgt in procs}
                     if current_totals != prev_totals:
                         last_progress = time.time()
                         prev_totals = dict(current_totals)
                     
-                    # Per-process death: clean up dead process fds individually
+                    # Per-process death: clean up dead process fds
                     for tgt, p in list(procs.items()):
                         if p.poll() is not None:
                             dead_fds = [fd for fd, (t, proc, _) in fd_to_tgt.items() if t == tgt and fd in active_fds]
-                            if dead_fds:
-                                dbg(f"DEAD: {tgt} rc={p.returncode} cleaning {len(dead_fds)} fds")
                             for fd in dead_fds:
                                 try:
                                     while True:
@@ -1182,25 +1164,9 @@ class PasteScanner:
                                     live.console.print(f"  ⚠️  {tgt} process exited with code {rc}", style="bold yellow")
                                 except: pass
                     
-                    # Heartbeat: debug status every 30s
+                    # Stale timeout
                     now = time.time()
-                    if now - last_heartbeat > 30:
-                        stale_elapsed = int(now - last_progress)
-                        alive = {t: "🟡" if p.poll() is None else f"🪦({p.returncode})" for t, p in procs.items()}
-                        dbg(f"HEARTBEAT loop={loop_count} stale={stale_elapsed}s/{STALE_TIMEOUT}s fds={len(active_fds)} "
-                            f"alive={alive} stats_rx={stats_received} totals={current_totals}")
-                        try:
-                            live.console.print(
-                                f"  💓 [{time.strftime('%H:%M:%S')}] stale={stale_elapsed}s/{STALE_TIMEOUT}s "
-                                f"stats_rx={dict(stats_received)} alive={alive}",
-                                style="dim cyan"
-                            )
-                        except: pass
-                        last_heartbeat = now
-                    
-                    # Stale timeout: no progress across ALL sites for 60s
                     if now - last_progress > STALE_TIMEOUT:
-                        dbg(f"STALE TIMEOUT! Killing all. totals={current_totals} stats_rx={stats_received}")
                         try:
                             live.console.print(f"\n  ⏰ No progress for {STALE_TIMEOUT}s, shutting down stale processes...", style="bold yellow")
                         except: pass
