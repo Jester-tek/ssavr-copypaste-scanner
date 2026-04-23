@@ -657,12 +657,17 @@ class PasteScanner:
             # Write our message
             if should_write:
                 if self.target == "cl1p":
-                    wrote = client.write(url_str, utils.normalize_text_output(self.write_msg))
+                    content_to_write = utils.normalize_text_output(self.write_msg)
+                    wrote = client.write(url_str, content_to_write)
+                    # cl1p API rejects bodies > ~940 chars with 400
+                    if wrote == 'too_long' and len(content_to_write) > 900:
+                        content_to_write = content_to_write[:900].rsplit('\n', 1)[0]
+                        wrote = client.write(url_str, content_to_write)
                     if wrote is True:
                         # Verify write by re-reading
                         time.sleep(0.3)
                         verify = client.read(url_str)
-                        if verify and self.write_msg[:30] in verify:
+                        if verify and content_to_write[:30] in verify:
                             if result.get("status") != "hit+write":
                                 result["status"] = "wrote"
                         else:
@@ -854,8 +859,10 @@ class PasteScanner:
             def _stats_emitter():
                 while self.running:
                     with self.stats_lock:
-                        sys.stderr.write(f"@@STATS@@{json.dumps(self.stats)}\n")
-                        sys.stderr.flush()
+                        emit = dict(self.stats)
+                    emit["retry_pending"] = len(getattr(self, 'retry_queue', []))
+                    sys.stderr.write(f"@@STATS@@{json.dumps(emit)}\n")
+                    sys.stderr.flush()
                     time.sleep(1)
             import threading
             threading.Thread(target=_stats_emitter, daemon=True).start()
@@ -999,9 +1006,9 @@ class PasteScanner:
         import os
         
         live_stats = {
-            "cl1p": {"checked": 0, "hits": 0, "wrote": 0, "errors": 0},
-            "justpaste": {"checked": 0, "hits": 0, "wrote": 0, "errors": 0},
-            "rentry": {"checked": 0, "hits": 0, "wrote": 0, "errors": 0}
+            "cl1p": {"checked": 0, "hits": 0, "wrote": 0, "errors": 0, "empty": 0, "duplicates": 0, "foreign_skipped": 0, "skipped_mine": 0, "retry_pending": 0},
+            "justpaste": {"checked": 0, "hits": 0, "wrote": 0, "errors": 0, "empty": 0, "duplicates": 0, "foreign_skipped": 0, "skipped_mine": 0, "retry_pending": 0},
+            "rentry": {"checked": 0, "hits": 0, "wrote": 0, "errors": 0, "empty": 0, "duplicates": 0, "foreign_skipped": 0, "skipped_mine": 0, "retry_pending": 0}
         }
         
         procs = {}
@@ -1030,11 +1037,13 @@ class PasteScanner:
             table.add_column("Empty/404", justify="center", style="dim white")
             table.add_column("Filtered", justify="center", style="dim yellow")
             table.add_column("Errors", justify="center", style="red")
+            table.add_column("Retrying", justify="center", style="bold yellow")
             for tgt in ["cl1p", "justpaste", "rentry"]:
                 s = live_stats[tgt]
                 status = "🟡" if procs[tgt].poll() is None else "🪦"
                 
-                skipped = s.get("duplicates", 0) + s.get("foreign_skipped", 0) + s.get("skipped_mine", 0)
+                filtered = s.get("duplicates", 0) + s.get("foreign_skipped", 0) + s.get("skipped_mine", 0)
+                retry_pending = s.get("retry_pending", 0)
                 
                 display_name = f"justpaste (READ)" if tgt == "justpaste" else tgt
                 
@@ -1044,8 +1053,9 @@ class PasteScanner:
                     str(s.get("hits", 0)),
                     str(s.get("wrote", 0)),
                     str(s.get("empty", 0)),
-                    str(skipped),
-                    str(s.get("errors", 0))
+                    str(filtered),
+                    str(s.get("errors", 0)),
+                    str(retry_pending) if retry_pending > 0 else "-"
                 )
             return table
 
@@ -1104,6 +1114,7 @@ class PasteScanner:
                                         live_stats[tgt]["duplicates"] = stats.get("duplicates", 0)
                                         live_stats[tgt]["foreign_skipped"] = stats.get("foreign_skipped", 0)
                                         live_stats[tgt]["skipped_mine"] = stats.get("skipped_mine", 0)
+                                        live_stats[tgt]["retry_pending"] = stats.get("retry_pending", 0)
                                     except: pass
                                 else:
                                     text_str = text.strip('\r')
@@ -1177,8 +1188,15 @@ class PasteScanner:
                 live.console.print("\n  🛑 Shutting down supervisor...", style="bold red")
 
             for p in procs.values():
-                try: p.terminate()
+                try: p.send_signal(signal.SIGINT)  # SIGINT triggers _handle_interrupt → _save_state
                 except: pass
+            
+            # Give subprocesses time to flush retry queues to disk
+            for p in procs.values():
+                try: p.wait(timeout=3)
+                except: 
+                    try: p.kill()
+                    except: pass
 
         print("  ✅ Scan finished.")
         print("  💾 State saved. Restart to continue where you left off.\n")

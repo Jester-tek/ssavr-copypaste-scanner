@@ -107,10 +107,10 @@ class Cl1pAPIClient:
             if resp.status_code in [200, 201]:
                 self.consecutive_errors = 0
                 return True
-            elif resp.status_code in [400, 409]:
-                # cl1p rejected the content (spam filter, blocked URL/crypto address)
+            elif resp.status_code == 400:
+                # cl1p rejects content that's too long or has bad encoding
                 self.consecutive_errors = 0
-                return False
+                return 'too_long'
             elif resp.status_code in self.RATE_LIMIT_CODES:
                 self.consecutive_errors += 1
                 time.sleep(1)
