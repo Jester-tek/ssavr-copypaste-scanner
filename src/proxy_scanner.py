@@ -1006,9 +1006,9 @@ class PasteScanner:
         import os
         
         live_stats = {
-            "cl1p": {"checked": 0, "hits": 0, "wrote": 0, "errors": 0, "empty": 0, "duplicates": 0, "foreign_skipped": 0, "skipped_mine": 0, "retry_pending": 0},
-            "justpaste": {"checked": 0, "hits": 0, "wrote": 0, "errors": 0, "empty": 0, "duplicates": 0, "foreign_skipped": 0, "skipped_mine": 0, "retry_pending": 0},
-            "rentry": {"checked": 0, "hits": 0, "wrote": 0, "errors": 0, "empty": 0, "duplicates": 0, "foreign_skipped": 0, "skipped_mine": 0, "retry_pending": 0}
+            "cl1p": {"checked": 0, "hits": 0, "wrote": 0, "wrote_fake": 0, "errors": 0, "empty": 0, "duplicates": 0, "foreign_skipped": 0, "skipped_mine": 0, "retry_pending": 0},
+            "justpaste": {"checked": 0, "hits": 0, "wrote": 0, "wrote_fake": 0, "errors": 0, "empty": 0, "duplicates": 0, "foreign_skipped": 0, "skipped_mine": 0, "retry_pending": 0},
+            "rentry": {"checked": 0, "hits": 0, "wrote": 0, "wrote_fake": 0, "errors": 0, "empty": 0, "duplicates": 0, "foreign_skipped": 0, "skipped_mine": 0, "retry_pending": 0}
         }
         
         procs = {}
@@ -1051,7 +1051,7 @@ class PasteScanner:
                     f"{display_name} {status}",
                     str(s.get("checked", 0)),
                     str(s.get("hits", 0)),
-                    str(s.get("wrote", 0)),
+                    str(s.get("wrote", 0) + s.get("wrote_fake", 0)),
                     str(s.get("empty", 0)),
                     str(filtered),
                     str(s.get("errors", 0)),
@@ -1109,6 +1109,7 @@ class PasteScanner:
                                         live_stats[tgt]["checked"] = stats.get("checked", 0)
                                         live_stats[tgt]["hits"] = stats.get("hits", 0)
                                         live_stats[tgt]["wrote"] = stats.get("wrote", 0)
+                                        live_stats[tgt]["wrote_fake"] = stats.get("wrote_fake", 0)
                                         live_stats[tgt]["errors"] = stats.get("errors", 0)
                                         live_stats[tgt]["empty"] = stats.get("empty", 0)
                                         live_stats[tgt]["duplicates"] = stats.get("duplicates", 0)
