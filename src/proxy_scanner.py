@@ -14,6 +14,7 @@ import hashlib
 import argparse
 import threading
 from datetime import datetime
+from collections import deque
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
@@ -378,7 +379,7 @@ class PasteScanner:
             self.api_token = getattr(config, 'CL1P_API_TOKEN', "")
             
         if self.target == "cl1p":
-            self.workers = 100
+            self.workers = 300
             self.using_proxies = False
             self.site_timeout = 3  # Direct API, no proxy overhead
         elif self.target == "rentry":
@@ -466,13 +467,13 @@ class PasteScanner:
                     data = json.load(f)
                 # Load retry queue if it exists for this target
                 retry_key = f"{self.target}_{self.mode}_retry"
-                self.retry_queue = data.get(retry_key, [])
+                self.retry_queue = deque(data.get(retry_key, []))
                 if self.retry_queue and not self.quiet_ui:
                     print(f"  🔄 Loaded {len(self.retry_queue)} URLs from retry queue")
                 return data
             except:
                 pass
-        self.retry_queue = []
+        self.retry_queue = deque()
         return {}
 
     def _save_state(self):
@@ -481,7 +482,7 @@ class PasteScanner:
         
         # Persist retry queue so failed URLs survive restarts
         retry_key = f"{self.target}_{self.mode}_retry"
-        self.state[retry_key] = list(getattr(self, 'retry_queue', []))
+        self.state[retry_key] = list(getattr(self, 'retry_queue', deque()))
         
         STATE_FILE.parent.mkdir(exist_ok=True)
         with open(STATE_FILE, "w") as f:
@@ -650,7 +651,6 @@ class PasteScanner:
                         result["status"] = "mine"
                     else:
                         result["status"] = "duplicate"
-                    result["status"] = "occupied"
             else:
                 should_write = True
 
@@ -882,8 +882,8 @@ class PasteScanner:
 
                 batch = []
                 # First, fill the batch with URLs that previously failed
-                while getattr(self, 'retry_queue', []) and len(batch) < self.workers:
-                    batch.append(self.retry_queue.pop(0))
+                while getattr(self, 'retry_queue', deque()) and len(batch) < self.workers:
+                    batch.append(self.retry_queue.popleft())
                 
                 # Then fill the rest with new URLs
                 needed = self.workers - len(batch)
@@ -894,7 +894,8 @@ class PasteScanner:
                 futures = {executor.submit(self._process_url, idx): idx for idx in batch}
                 
                 try:
-                    for future in as_completed(futures, timeout=15):
+                    batch_timeout = self.site_timeout * 2 + 10  # enough for 2 retries + overhead
+                    for future in as_completed(futures, timeout=batch_timeout):
                         if not self.running:
                             break
                         try:
@@ -921,7 +922,6 @@ class PasteScanner:
                                 self._print_wrote_batched(msg)
                             elif r["status"] == "wrote_fake":
                                 self.stats["wrote_fake"] += 1
-                                self.stats["empty"] += 1
                                 msg = f"  ⚠️  WROTE but NOT verified {self.site_url.replace('https://', '')}/{r['url']}"
                                 self._print_wrote_batched(msg)
                             elif r["status"] == "empty":
@@ -932,12 +932,12 @@ class PasteScanner:
                                 self.stats["foreign_skipped"] += 1
                             elif r["status"] == "mine":
                                 self.stats["skipped_mine"] += 1
-                            elif r["status"] in ["error", "rate_limit"]:
-                                if not hasattr(self, 'retry_queue'): self.retry_queue = []
+                            elif r["status"] in ["error", "rate_limit", "error_write"]:
+                                if not hasattr(self, 'retry_queue'): self.retry_queue = deque()
                                 self.retry_queue.append(r["idx"])
                                 self.stats["errors"] += 1
                             else:
-                                if not hasattr(self, 'retry_queue'): self.retry_queue = []
+                                if not hasattr(self, 'retry_queue'): self.retry_queue = deque()
                                 self.retry_queue.append(r["idx"])
                                 self.stats["errors"] += 1
                 except TimeoutError:
@@ -947,7 +947,7 @@ class PasteScanner:
                         print(f"  ⏰ Batch timeout! {stuck}/{self.workers} stuck threads, recycling executor...")
                     for f in futures:
                         if not f.done():
-                            if not hasattr(self, 'retry_queue'): self.retry_queue = []
+                            if not hasattr(self, 'retry_queue'): self.retry_queue = deque()
                             self.retry_queue.append(futures[f])
                         f.cancel()
                     with self.stats_lock:
@@ -965,7 +965,7 @@ class PasteScanner:
                 last_url = index_to_string(batch[-1] if batch else self.current_idx)
                 
                 # Show retry queue size in status if it exists
-                q_size = len(getattr(self, 'retry_queue', []))
+                q_size = len(getattr(self, 'retry_queue', deque()))
                 status_suffix = f" (Retrying {q_size})" if q_size > 0 else ""
                 self._print_status_line(last_url + status_suffix)
 
@@ -973,7 +973,7 @@ class PasteScanner:
                 if self.stats["checked"] % 200 == 0:
                     self._save_state()
 
-                time.sleep(0.01)
+
 
         except KeyboardInterrupt:
             self.running = False
