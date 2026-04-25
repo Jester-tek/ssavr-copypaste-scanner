@@ -1108,6 +1108,7 @@ class PasteScanner:
                 active_fds = set(fd_to_tgt.keys())
                 last_progress = time.time()
                 prev_totals = {tgt: 0 for tgt in procs}
+                STALE_TIMEOUT = 120
                 RATE_LIMIT_CODES = {403, 429, 503}
                 fd_buffers = {fd: bytearray() for fd in fd_to_tgt}
                 
