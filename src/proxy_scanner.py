@@ -196,8 +196,9 @@ class ResultsWriter:
     """Writes results in a clean, readable format. Deduplicates by content.
     Supports V2 revision tracking for changed URLs."""
 
-    def __init__(self, filepath):
+    def __init__(self, filepath, filter_enabled=False):
         self.filepath = filepath
+        self.filter_enabled = filter_enabled
         self.lock = threading.Lock()
         self.count = 0
         self.foreign_skipped = 0
@@ -281,8 +282,8 @@ class ResultsWriter:
             with open(self.filepath, "w", encoding="utf-8") as f:
                 f.write(self._format_header() + "\n")
 
-        # Foreign script filter (ratio-based: skip if >50% foreign)
-        if is_foreign_content(content, threshold=50):
+        # Foreign script filter (ratio-based: skip if >50% foreign) — only when --filter is active
+        if self.filter_enabled and is_foreign_content(content, threshold=50):
             self.record_skip("foreign")
             return "foreign"
         
@@ -367,6 +368,7 @@ class PasteScanner:
         self.mode = args.mode
         self.write_msg = self._load_write_message()
         self.quiet_ui = getattr(args, 'quiet_ui', False)
+        self.filter_enabled = getattr(args, 'filter', False)
         
         # Special handling for target="all"
         if self.target == "all":
@@ -430,13 +432,13 @@ class PasteScanner:
         # Config sites
         if self.target == "cl1p":
             self.site_url = "https://cl1p.net"
-            self.results = ResultsWriter(CL1P_RESULTS)
+            self.results = ResultsWriter(CL1P_RESULTS, filter_enabled=self.filter_enabled)
         elif self.target == "rentry":
             self.site_url = "https://rentry.co"
-            self.results = ResultsWriter(RENTRY_RESULTS)
+            self.results = ResultsWriter(RENTRY_RESULTS, filter_enabled=self.filter_enabled)
         else:
             self.site_url = "https://justpaste.it"
-            self.results = ResultsWriter(JUSTPASTE_RESULTS)
+            self.results = ResultsWriter(JUSTPASTE_RESULTS, filter_enabled=self.filter_enabled)
 
         self.results._init_header()
 
@@ -848,10 +850,10 @@ class PasteScanner:
         print(f"  🔄 URLs checked: {self.stats['checked']}")
         print(f"  ✨ New content found: {self.stats['hits']}")
         print(f"  📝 Revisions (V2+): {self.stats['revisions']}")
-        print(f"  🌍 Foreign languages skipped: {self.stats['foreign_skipped']}")
+        if self.filter_enabled:
+            print(f"  🌍 Foreign languages skipped: {self.stats['foreign_skipped']}")
         print(f"  🔁 Duplicates skipped: {self.stats['duplicates']}")
         print(f"  🏠 Own messages skipped: {self.stats['skipped_mine']}")
-        print(f"  📊 Skip breakdown: foreign={self.stats['foreign_skipped']}, dup={self.stats['duplicates']}, mine={self.stats['skipped_mine']}")
         print(f"  📝 Empty/404: {self.stats['empty']}")
         print(f"  ❌ Network errors: {self.stats['errors']}")
         if self.mode == "write":
@@ -1051,12 +1053,15 @@ class PasteScanner:
             cmd = [sys.executable, "-u", sys.argv[0], "--mod2", "-t", tgt, "--quiet-ui"]
             if getattr(self.args, 'reset', False): cmd.append("--reset")
             if getattr(self.args, 'start', ''): cmd.extend(["--start", self.args.start])
+            if getattr(self.args, 'filter', False): cmd.append("--filter")
 
             if tgt_mode == "write" and tgt == "cl1p":
                 if getattr(self.args, 'write_file', None): cmd.extend(["-wf", self.args.write_file])
                 elif getattr(self.args, 'write', None): cmd.extend(["-w", self.args.write])
                 
             procs[tgt] = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=1048576)
+
+        show_filter_col = getattr(self.args, 'filter', False)
 
         def generate_table():
             table = Table(title="Live Scanner Performance", style="cyan")
@@ -1065,28 +1070,31 @@ class PasteScanner:
             table.add_column("Hits Found", justify="center", style="green")
             table.add_column("Written OK", justify="center", style="yellow")
             table.add_column("Empty/404", justify="center", style="dim white")
-            table.add_column("Filtered", justify="center", style="dim yellow")
+            if show_filter_col:
+                table.add_column("Filtered", justify="center", style="dim yellow")
             table.add_column("Errors", justify="center", style="red")
             table.add_column("Retrying", justify="center", style="bold yellow")
             for tgt in ["cl1p", "justpaste", "rentry"]:
                 s = live_stats[tgt]
                 status = "🟡" if procs[tgt].poll() is None else "🪦"
-                
-                filtered = s.get("duplicates", 0) + s.get("foreign_skipped", 0) + s.get("skipped_mine", 0)
                 retry_pending = s.get("retry_pending", 0)
-                
-                display_name = f"justpaste (READ)" if tgt == "justpaste" else tgt
-                
-                table.add_row(
+                display_name = "justpaste (READ)" if tgt == "justpaste" else tgt
+
+                row = [
                     f"{display_name} {status}",
                     str(s.get("checked", 0)),
                     str(s.get("hits", 0)),
                     str(s.get("wrote", 0) + s.get("wrote_fake", 0)),
                     str(s.get("empty", 0)),
-                    str(filtered),
+                ]
+                if show_filter_col:
+                    filtered = s.get("duplicates", 0) + s.get("foreign_skipped", 0) + s.get("skipped_mine", 0)
+                    row.append(str(filtered))
+                row += [
                     str(s.get("errors", 0)),
-                    str(retry_pending) if retry_pending > 0 else "-"
-                )
+                    str(retry_pending) if retry_pending > 0 else "-",
+                ]
+                table.add_row(*row)
             return table
 
         with Live(generate_table(), refresh_per_second=2, screen=False) as live:
@@ -1274,6 +1282,8 @@ Examples:
                         help="Reset ALL sites and counters from scratch")
     parser.add_argument("--start", type=str, default="",
                         help="Start from a specific URL (e.g., --start abc)")
+    parser.add_argument("-f", "--filter", action="store_true",
+                        help="Enable foreign language filter: skip content where >50%% of characters are non-Latin script")
     parser.add_argument("--quiet-ui", action="store_true", help=argparse.SUPPRESS)
 
     args = parser.parse_args()
