@@ -5,7 +5,7 @@ from .. import config
 class Cl1pAPIClient:
     """Client per cl1p.net usando le API ufficiali con token."""
     
-    RATE_LIMIT_CODES = {429, 503}
+    RATE_LIMIT_CODES = {403, 429, 503}
     
     def __init__(self, api_token, session_factory=None):
         self.api_token = api_token

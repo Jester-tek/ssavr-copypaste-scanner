@@ -41,6 +41,7 @@ URL_HISTORY_FILE = Path("data/url_content_history.json")
 CL1P_RESULTS = Path("cl1p_clean.txt")
 JUSTPASTE_RESULTS = Path("justpaste_clean.txt")
 RENTRY_RESULTS = Path("rentry_clean.txt")
+CL1P_KEYS_FILE = Path("data/cl1p_keys.txt")
 
 # ─── Fast C Extensions ───────────────────────────────────────────────────────
 import ctypes
@@ -372,16 +373,24 @@ class PasteScanner:
             self.running = True
             return
             
+        # Load cl1p API tokens
+        self.cl1p_tokens = self._load_cl1p_tokens()
+        self.token_idx = 0
+        self.token_lock = threading.Lock()
+        
         try:
             import src.secrets as secret_cfg
-            self.api_token = getattr(secret_cfg, 'CL1P_API_TOKEN', "")
+            primary_token = getattr(secret_cfg, 'CL1P_API_TOKEN', "")
         except ImportError:
-            self.api_token = getattr(config, 'CL1P_API_TOKEN', "")
+            primary_token = getattr(config, 'CL1P_API_TOKEN', "")
+            
+        if not self.cl1p_tokens and primary_token:
+            self.cl1p_tokens = [primary_token]
             
         if self.target == "cl1p":
-            self.workers = 300
-            self.using_proxies = False
-            self.site_timeout = 3  # Direct API, no proxy overhead
+            self.workers = 300  # Restored to 300 now that we have 5 keys and proxies
+            self.using_proxies = True # FORCED PROXIES due to 100% IP ban on cl1p
+            self.site_timeout = 5  # Increased for proxy handshake
         elif self.target == "rentry":
             self.workers = config.MOD2_PROXY_THREAD_COUNT
             self.using_proxies = True
@@ -451,6 +460,20 @@ class PasteScanner:
         # Signal handler
         signal.signal(signal.SIGINT, self._handle_interrupt)
 
+    def _load_cl1p_tokens(self):
+        """Load multiple cl1p API tokens from file for rotation."""
+        tokens = []
+        if CL1P_KEYS_FILE.exists():
+            try:
+                with open(CL1P_KEYS_FILE, "r") as f:
+                    for line in f:
+                        t = line.strip()
+                        if t and not t.startswith("#"):
+                            tokens.append(t)
+            except Exception as e:
+                print(f"  ⚠️ Error loading cl1p keys: {e}")
+        return tokens
+
     def _load_write_message(self):
         """Load write message from args (which were already populated from file loading in main)."""
         if self.mode != "write":
@@ -513,7 +536,14 @@ class PasteScanner:
         """Returns an isolated HTTP client for the current thread."""
         if not hasattr(self.thread_local, "client"):
             if self.target == "cl1p":
-                c = Cl1pAPIClient(self.api_token)
+                # Token rotation: assign a token to this worker
+                with self.token_lock:
+                    if not self.cl1p_tokens:
+                        token = ""
+                    else:
+                        token = self.cl1p_tokens[self.token_idx % len(self.cl1p_tokens)]
+                        self.token_idx += 1
+                c = Cl1pAPIClient(token)
             elif self.target == "rentry":
                 c = RentryClient()
             else:
@@ -1078,7 +1108,7 @@ class PasteScanner:
                 active_fds = set(fd_to_tgt.keys())
                 last_progress = time.time()
                 prev_totals = {tgt: 0 for tgt in procs}
-                STALE_TIMEOUT = 120
+                RATE_LIMIT_CODES = {403, 429, 503}
                 fd_buffers = {fd: bytearray() for fd in fd_to_tgt}
                 
                 while active_fds:
