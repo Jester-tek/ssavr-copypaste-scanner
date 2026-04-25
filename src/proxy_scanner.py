@@ -388,7 +388,7 @@ class PasteScanner:
             self.cl1p_tokens = [primary_token]
             
         if self.target == "cl1p":
-            self.workers = 300  # Restored to 300 now that we have 5 keys and proxies
+            self.workers = 500  # Pushed to 500 workers for cl1p now that we have 5 keys and proxies
             self.using_proxies = True # FORCED PROXIES due to 100% IP ban on cl1p
             self.site_timeout = 5  # Increased for proxy handshake
         elif self.target == "rentry":

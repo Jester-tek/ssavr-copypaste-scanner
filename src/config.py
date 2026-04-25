@@ -98,9 +98,18 @@ PROXY_SOURCES = [
     # roosterkid
     "https://raw.githubusercontent.com/roosterkid/openproxylist/main/SOCKS5_RAW.txt",
     "https://raw.githubusercontent.com/roosterkid/openproxylist/main/HTTPS_RAW.txt",
+    # Anis-Fekih (Fast Updated)
+    "https://raw.githubusercontent.com/Anis-Fekih/Fast-Updated-Proxies/main/socks5.txt",
+    "https://raw.githubusercontent.com/Anis-Fekih/Fast-Updated-Proxies/main/http.txt",
+    # Vann-Dev
+    "https://raw.githubusercontent.com/Vann-Dev/proxy-list/main/proxies/socks5.txt",
+    "https://raw.githubusercontent.com/Vann-Dev/proxy-list/main/proxies/http.txt",
+    # vakhov
+    "https://raw.githubusercontent.com/vakhov/free-proxy-list/master/proxies_raw/socks5.txt",
+    "https://raw.githubusercontent.com/vakhov/free-proxy-list/master/proxies_raw/http.txt",
 ]
 MOD1_PROXY_THREAD_COUNT = 300  # Mod1 (Tor/IP Rotation): Lower count to preserve proxy pool and prioritize IP variety
-MOD2_PROXY_THREAD_COUNT = 1000 # Mod2 (Brute-Forcer): Extreme throughput for checking massive sequential URLs
+MOD2_PROXY_THREAD_COUNT = 2500 # Mod2 (Brute-Forcer): Extreme throughput for checking massive sequential URLs
 PROXY_CONNECT_TIMEOUT = 12 # Seconds to wait for a free proxy to connect
 
 def load_config():
