@@ -10,6 +10,7 @@ import time
 import random
 import signal
 import ctypes
+import threading
 from pathlib import Path
 from datetime import datetime
 
@@ -54,14 +55,15 @@ class ScannerApp:
             "airforshare": AirForShareClient(self.tor.get_new_session)
         }
         self.stats = {
-            "ssavr": {"read_fail": 0, "write_fail": 0, "verify_fail": 0, "proxy_success": 0, "new_found": 0},
-            "copypaste": {"read_fail": 0, "write_fail": 0, "verify_fail": 0, "proxy_success": 0, "new_found": 0},
-            "airforshare": {"read_fail": 0, "write_fail": 0, "verify_fail": 0, "proxy_success": 0, "new_found": 0}
+            "ssavr": {"read_fail": 0, "read_success": 0, "write_fail": 0, "write_success": 0, "verify_fail": 0, "new_found": 0, "proxy_success": 0},
+            "copypaste": {"read_fail": 0, "read_success": 0, "write_fail": 0, "write_success": 0, "verify_fail": 0, "new_found": 0, "proxy_success": 0},
+            "airforshare": {"read_fail": 0, "read_success": 0, "write_fail": 0, "write_success": 0, "verify_fail": 0, "new_found": 0, "proxy_success": 0}
         }
         self.ip_skips = 0
         self.proxy_manager = proxy_manager.ProxyManager()
         self.proxy_executor = None
         self.start_time = time.time()
+        self.stats_lock = threading.Lock()  # Protects self.stats from concurrent += races
         
         signal.signal(signal.SIGINT, self.handle_interrupt)
 
@@ -78,24 +80,31 @@ class ScannerApp:
 
         # Display stats
         print(f"\n[ssavr.com]")
+        print(f"  📖 Successful Reads: {self.stats['ssavr']['read_success']}")
         print(f"  ❌ Read failures: {self.stats['ssavr']['read_fail']}")
+        print(f"  ✍️ Successful Writes: {self.stats['ssavr']['write_success']}")
         print(f"  ❌ Write failures: {self.stats['ssavr']['write_fail']}")
         print(f"  ❌ Verify failures: {self.stats['ssavr']['verify_fail']}")
         print(f"  ✨ New content saved: {self.stats['ssavr']['new_found']}")
 
         print(f"\n[copy-paste.online]")
+        print(f"  📖 Successful Reads: {self.stats['copypaste']['read_success']}")
         print(f"  ❌ Read failures: {self.stats['copypaste']['read_fail']}")
+        print(f"  ✍️ Successful Writes: {self.stats['copypaste']['write_success']}")
         print(f"  ❌ Write failures: {self.stats['copypaste']['write_fail']}")
         print(f"  ❌ Verify failures: {self.stats['copypaste']['verify_fail']}")
         print(f"  ✨ New content saved: {self.stats['copypaste']['new_found']}")
 
         print(f"\n[airforshare.com]")
+        print(f"  📖 Successful Reads: {self.stats['airforshare']['read_success']}")
         print(f"  ❌ Read failures: {self.stats['airforshare']['read_fail']}")
+        print(f"  ✍️ Successful Writes: {self.stats['airforshare']['write_success']}")
         print(f"  ❌ Write failures: {self.stats['airforshare']['write_fail']}")
         print(f"  ❌ Verify failures: {self.stats['airforshare']['verify_fail']}")
         print(f"  ✨ New content saved: {self.stats['airforshare']['new_found']}")
 
-        total_fails = sum(self.stats[s][k] for s in self.stats for k in self.stats[s] if k != 'proxy_success')
+        fail_keys = {'read_fail', 'write_fail', 'verify_fail'}
+        total_fails = sum(self.stats[s][k] for s in self.stats for k in self.stats[s] if k in fail_keys)
         
         print(f"\n[Infrastructure]")
         print(f"  🔄 Total Tor restarts: {self.tor.restarts}")
@@ -117,15 +126,17 @@ class ScannerApp:
         print("\n" + "="*80)
         print("📊 STATISTICS")
         print("="*80)
-        for key in ["ssavr", "copypaste", "airforshare"]:
-            name = key.replace("copypaste", "copy-paste.online").replace("ssavr", "ssavr.com").replace("airforshare", "airforshare.com")
-            print(f"\n[{name}]")
-            print(f"  ❌ Read failures: {self.stats[key]['read_fail']}")
-            print(f"  ❌ Write failures: {self.stats[key]['write_fail']}")
-            print(f"  ❌ Verify failures: {self.stats[key]['verify_fail']}")
-            print(f"    ✨ New content found: {self.stats[key]['new_found']}")
+        for site in ["ssavr", "copypaste", "airforshare"]:
+            print(f"\n[{site}.com]" if site != "copypaste" else f"\n[{site}.online]")
+            print(f"  📖 Successful Reads: {self.stats[site]['read_success']}")
+            print(f"  ❌ Read failures: {self.stats[site]['read_fail']}")
+            print(f"  ✍️ Successful Writes: {self.stats[site]['write_success']}")
+            print(f"  ❌ Write failures: {self.stats[site]['write_fail']}")
+            print(f"  ❌ Verify failures: {self.stats[site]['verify_fail']}")
+            print(f"  ✨ New content saved: {self.stats[site]['new_found']}")
         
-        total_fails = sum(self.stats['ssavr'].values()) + sum(self.stats['copypaste'].values()) + sum(self.stats['airforshare'].values()) - self.stats['ssavr']['proxy_success'] - self.stats['copypaste']['proxy_success'] - self.stats['airforshare']['proxy_success']
+        fail_keys = {'read_fail', 'write_fail', 'verify_fail'}
+        total_fails = sum(self.stats[s][k] for s in self.stats for k in self.stats[s] if k in fail_keys)
         print(f"\n[Infrastructure]")
         print(f"  🔄 Total Tor restarts: {self.tor.restarts}")
         print(f"  ⏩ Total IPs skipped: {self.ip_skips}")
@@ -248,8 +259,12 @@ class ScannerApp:
         
         if current_content is None:
             update_status("Read Failed", "❌")
-            self.stats[site_key]["read_fail"] += 1
+            with self.stats_lock:
+                self.stats[site_key]["read_fail"] += 1
             return False
+            
+        with self.stats_lock:
+            self.stats[site_key]["read_success"] += 1
 
         # --- Foreign language filter (C-level) ---
         if is_foreign_content(current_content, threshold=3):
@@ -306,7 +321,8 @@ class ScannerApp:
                 )
                 self.storage.clean_cache[site_key][ip_address] = clean_content
                 self.storage.add_global_hash(site_key, clean_content)
-                self.stats[site_key]["new_found"] += 1
+                with self.stats_lock:
+                    self.stats[site_key]["new_found"] += 1
                 if display_manager and hasattr(display_manager, "split"):
                     with display_manager.split.lock:
                         if hasattr(display_manager, "proxy_addr"):
@@ -334,7 +350,8 @@ class ScannerApp:
             update_status("⚠️ Change detected!", "⚠️")
             time.sleep(2) # Show the alert briefly
         
-        self.storage.current_state[state_key] = current_content
+        with self.storage.state_lock:
+            self.storage.current_state[state_key] = current_content
         self.storage.save_current_state()
             # return  <-- Removed to allow fall-through to Write Logic
 
@@ -376,13 +393,17 @@ class ScannerApp:
                     if verify_content and utils.clean_text(verify_content) == utils.clean_text(write_content):
                         update_status("Done (Written & Verified)", "✅")
                         self.storage.update_current_view_file(site_name, ip_address, verify_content)
+                        with self.stats_lock:
+                            self.stats[site_key]["write_success"] += 1
                     else:
                         update_status("Verification Failed", "❌")
-                        self.stats[site_key]["verify_fail"] += 1
+                        with self.stats_lock:
+                            self.stats[site_key]["verify_fail"] += 1
                         return False
                 else:
                     update_status("Write Failed", "❌")
-                    self.stats[site_key]["write_fail"] += 1
+                    with self.stats_lock:
+                        self.stats[site_key]["write_fail"] += 1
                     return False
         return True # If no write was performed, or if write was successful
 
@@ -467,8 +488,11 @@ class ScannerApp:
                 
                 ssavr_success, cp_success, af_success = self.process_ip_with_clients(display_ip, proxy_clients, w_ssavr, w_cp, w_af, proxy_adapter, sequential=True)
                 
-                # A proxy is successful if it can read/write on AT LEAST ONE site.
-                if ssavr_success or cp_success or af_success:
+                # ✓ = proxy could reach at least one site (read succeeded).
+                # ✗ = proxy failed to connect to every site.
+                # Write failures are tracked per-site in stats, not in ✓/✗.
+                any_reachable = ssavr_success or cp_success or af_success
+                if any_reachable:
                     with proxy_manager_display.lock:
                         proxy_manager_display.proxy_success += 1
                     if ssavr_success:
@@ -577,8 +601,6 @@ class ScannerApp:
                 
                 items_list = list(items_to_scan)
                 idx = 0
-                retrying_current = False
-                
                 while idx < len(items_list) and self.running:
                     i, (fingerprint, ip_address) = items_list[idx]
                     
@@ -593,12 +615,11 @@ class ScannerApp:
                         
                         ssavr_success, cp_success, af_success = self.process_ip_with_clients(ip_address, self.clients, w_ssavr, w_cp, w_af, tor_adapter)
                         
-                        # Track Tor success/fail based on actual returned success flags
+                        # ✓ = Tor exit node was reachable and we processed it.
+                        # Write/verify failures are already tracked per-site in stats.
+                        # ✗ is only for actual Tor routing failures (verified=False).
                         with split_display.lock:
-                            if ssavr_success or cp_success or af_success:
-                                split_display.tor_success += 1
-                            else:
-                                split_display.tor_fail += 1
+                            split_display.tor_success += 1
                         
                         # Move to next IP
                         idx += 1
@@ -608,18 +629,9 @@ class ScannerApp:
                         with split_display.lock:
                             split_display.tor_fail += 1
                         
-                        if not retrying_current:
-                            # FIRST FAILURE: Reset Circuit & Retry SAME IP
-                            tor_adapter.log(f"❌ Verification failed. Hard resetting Tor and retrying same IP...")
-                            self.tor.reset_circuit()
-                            retrying_current = True
-                            # Do NOT increment idx, loop will repeat same IP
-                        else:
-                            # SECOND FAILURE (After Reset): Skip this IP
-                            tor_adapter.log(f"❌ Failed again after reset. Skipping IP {ip_address}.")
-                            self.ip_skips += 1
-                            retrying_current = False
-                            idx += 1 # Move to next IP
+                        tor_adapter.log(f"❌ Verification failed. Skipping IP {ip_address}.")
+                        self.ip_skips += 1
+                        idx += 1 # Move to next IP
                     
                     if self.args.single: break
 
@@ -643,7 +655,13 @@ class ScannerApp:
             
             if self.proxy_executor:
                 self.proxy_executor.shutdown(wait=False, cancel_futures=True)
-            # Tor shutdown handled by atexit handler in TorManager
+                
+            # Tor shutdown handled explicitly because we will force exit
+            if hasattr(self, 'tor') and self.tor:
+                self.tor.shutdown_scanner_tor()
+                
+            import os
+            os._exit(0)  # Force exit immediately, bypassing stuck thread pool timeouts
 
 
 # Helper to load file content

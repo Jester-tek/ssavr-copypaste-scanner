@@ -51,7 +51,7 @@ DEFAULT_SOCKS_PORT = SCANNER_SOCKS_PORT
 DEFAULT_CONTROL_PORT = SCANNER_CONTROL_PORT
 
 # Performance / Timeouts
-TOR_CONNECT_TIMEOUT = 25  # Seconds to wait for Tor IP verification
+TOR_CONNECT_TIMEOUT = 12  # Seconds to wait for Tor IP verification
 SITE_READ_TIMEOUT = 3
 SITE_WRITE_TIMEOUT = 5  # Seconds to wait for website
 SITE_RETRY_DELAY = 1      # Seconds between retries

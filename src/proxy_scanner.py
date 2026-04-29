@@ -15,7 +15,7 @@ import argparse
 import threading
 from datetime import datetime
 from collections import deque
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, as_completed, wait, FIRST_COMPLETED
 from pathlib import Path
 
 # Add project root to path
@@ -390,7 +390,7 @@ class PasteScanner:
             self.cl1p_tokens = [primary_token]
             
         if self.target == "cl1p":
-            self.workers = 500  # Pushed to 500 workers for cl1p now that we have 5 keys and proxies
+            self.workers = 2500  # Match other scanners - cl1p API is lightweight
             self.using_proxies = True # FORCED PROXIES due to 100% IP ban on cl1p
             self.site_timeout = 5  # Increased for proxy handshake
         elif self.target == "rentry":
@@ -442,13 +442,19 @@ class PasteScanner:
 
         self.results._init_header()
 
-        # Count existing results in file
+        # Count existing results in file asynchronously to avoid blocking supervisor
         if self.results.filepath.exists():
-            try:
-                with open(self.results.filepath, "r") as f:
-                    self.results.count = f.read().count("=" * 70) // 2
-            except:
-                pass
+            def _count():
+                try:
+                    count_separators = 0
+                    with open(self.results.filepath, "r", encoding="utf-8", errors="ignore") as f:
+                        for line in f:
+                            if line.startswith("======================================================================"):
+                                count_separators += 1
+                    self.results.count = count_separators // 2
+                except Exception:
+                    pass
+            threading.Thread(target=_count, daemon=True).start()
 
         # Register write message in history
         if self.write_msg:
@@ -696,8 +702,7 @@ class PasteScanner:
                         content_to_write = content_to_write[:900].rsplit('\n', 1)[0]
                         wrote = client.write(url_str, content_to_write)
                     if wrote is True:
-                        # Verify write by re-reading
-                        time.sleep(0.3)
+                        # Verify write by re-reading (API is sync, no delay needed)
                         verify = client.read(url_str)
                         if verify and content_to_write[:30] in verify:
                             if result.get("status") != "hit+write":
@@ -900,6 +905,7 @@ class PasteScanner:
             threading.Thread(target=_stats_emitter, daemon=True).start()
 
         executor = ThreadPoolExecutor(max_workers=self.workers)
+        futures = {}
         try:
             while self.running:
                 if rate_limit_cooldown > 0:
@@ -912,89 +918,70 @@ class PasteScanner:
                 
                 self._flush_print_batch()
 
-                batch = []
-                # First, fill the batch with URLs that previously failed
-                while getattr(self, 'retry_queue', deque()) and len(batch) < self.workers:
-                    batch.append(self.retry_queue.popleft())
+                # Maintain a full queue of workers using a sliding window
+                while len(futures) < self.workers and self.running:
+                    if getattr(self, 'retry_queue', deque()):
+                        idx = self.retry_queue.popleft()
+                    else:
+                        idx = self.current_idx
+                        self.current_idx += 1
+                    future = executor.submit(self._process_url, idx)
+                    futures[future] = idx
                 
-                # Then fill the rest with new URLs
-                needed = self.workers - len(batch)
-                if needed > 0:
-                    batch.extend(list(range(self.current_idx, self.current_idx + needed)))
-                    self.current_idx += needed
+                if not futures:
+                    continue
 
-                futures = {executor.submit(self._process_url, idx): idx for idx in batch}
+                # Wait for at least one future to complete
+                done, not_done = wait(
+                    futures.keys(), return_when=FIRST_COMPLETED, timeout=1.0
+                )
                 
-                try:
-                    batch_timeout = self.site_timeout * 2 + 10  # enough for 2 retries + overhead
-                    for future in as_completed(futures, timeout=batch_timeout):
-                        if not self.running:
-                            break
-                        try:
-                            r = future.result()
-                        except Exception:
-                            r = {"idx": futures[future], "status": "error", "url": "???"}
-                            
-                        with self.stats_lock:
-                            self.stats["checked"] += 1
-                            if r["status"] in ["hit", "hit+write"]:
-                                self.stats["hits"] += 1
-                                self._print_hit(r["url"], r.get("content_len", 0),
-                                                content=r.get("content", ""),
-                                                is_write_hit=(r["status"] == "hit+write"))
-                            elif r["status"] == "revision":
-                                self.stats["hits"] += 1
-                                self.stats["revisions"] += 1
-                                self._print_hit(r["url"], r.get("content_len", 0),
-                                                content=r.get("content", ""),
-                                                is_revision=True)
-                            elif r["status"] == "wrote":
-                                self.stats["wrote"] += 1
-                                msg = f"  ✅ WROTE+VERIFIED! {self.site_url.replace('https://', '')}/{r['url']}"
-                                self._print_wrote_batched(msg)
-                            elif r["status"] == "wrote_fake":
-                                self.stats["wrote_fake"] += 1
-                                msg = f"  ⚠️  WROTE but NOT verified {self.site_url.replace('https://', '')}/{r['url']}"
-                                self._print_wrote_batched(msg)
-                            elif r["status"] == "empty":
-                                self.stats["empty"] += 1
-                            elif r["status"] in ["duplicate", "occupied"]:
-                                self.stats["duplicates"] += 1
-                            elif r["status"] == "foreign":
-                                self.stats["foreign_skipped"] += 1
-                            elif r["status"] == "mine":
-                                self.stats["skipped_mine"] += 1
-                            elif r["status"] in ["error", "rate_limit", "error_write"]:
-                                if not hasattr(self, 'retry_queue'): self.retry_queue = deque()
-                                self.retry_queue.append(r["idx"])
-                                self.stats["errors"] += 1
-                            else:
-                                if not hasattr(self, 'retry_queue'): self.retry_queue = deque()
-                                self.retry_queue.append(r["idx"])
-                                self.stats["errors"] += 1
-                except TimeoutError:
-                    # Batch took too long - some threads are stuck
-                    stuck = sum(1 for f in futures if not f.done())
-                    if not self.quiet_ui:
-                        print(f"  ⏰ Batch timeout! {stuck}/{self.workers} stuck threads, recycling executor...")
-                    for f in futures:
-                        if not f.done():
-                            if not hasattr(self, 'retry_queue'): self.retry_queue = deque()
-                            self.retry_queue.append(futures[f])
-                        f.cancel()
-                    with self.stats_lock:
-                        self.stats["errors"] += stuck
-                    # Kill the old executor and create a fresh one.
-                    # cancel() cannot stop already-running threads, so stuck
-                    # threads would permanently fill the pool. A fresh executor
-                    # guarantees all slots are free for the next batch.
+                for future in done:
+                    idx = futures.pop(future)
                     try:
-                        executor.shutdown(wait=False, cancel_futures=True)
-                    except TypeError:
-                        executor.shutdown(wait=False)
-                    executor = ThreadPoolExecutor(max_workers=self.workers)
+                        r = future.result()
+                    except Exception:
+                        r = {"idx": idx, "status": "error", "url": "???"}
+                        
+                    with self.stats_lock:
+                        self.stats["checked"] += 1
+                        if r["status"] in ["hit", "hit+write"]:
+                            self.stats["hits"] += 1
+                            self._print_hit(r["url"], r.get("content_len", 0),
+                                            content=r.get("content", ""),
+                                            is_write_hit=(r["status"] == "hit+write"))
+                        elif r["status"] == "revision":
+                            self.stats["hits"] += 1
+                            self.stats["revisions"] += 1
+                            self._print_hit(r["url"], r.get("content_len", 0),
+                                            content=r.get("content", ""),
+                                            is_revision=True)
+                        elif r["status"] == "wrote":
+                            self.stats["wrote"] += 1
+                            msg = f"  ✅ WROTE+VERIFIED! {self.site_url.replace('https://', '')}/{r['url']}"
+                            self._print_wrote_batched(msg)
+                        elif r["status"] == "wrote_fake":
+                            self.stats["wrote_fake"] += 1
+                            msg = f"  ⚠️  WROTE but NOT verified {self.site_url.replace('https://', '')}/{r['url']}"
+                            self._print_wrote_batched(msg)
+                        elif r["status"] == "empty":
+                            self.stats["empty"] += 1
+                        elif r["status"] in ["duplicate", "occupied"]:
+                            self.stats["duplicates"] += 1
+                        elif r["status"] == "foreign":
+                            self.stats["foreign_skipped"] += 1
+                        elif r["status"] == "mine":
+                            self.stats["skipped_mine"] += 1
+                        elif r["status"] in ["error", "rate_limit", "error_write"]:
+                            if not hasattr(self, 'retry_queue'): self.retry_queue = deque()
+                            self.retry_queue.append(r["idx"])
+                            self.stats["errors"] += 1
+                        else:
+                            if not hasattr(self, 'retry_queue'): self.retry_queue = deque()
+                            self.retry_queue.append(r["idx"])
+                            self.stats["errors"] += 1
 
-                last_url = index_to_string(batch[-1] if batch else self.current_idx)
+                last_url = index_to_string(self.current_idx - 1)
                 
                 # Show retry queue size in status if it exists
                 q_size = len(getattr(self, 'retry_queue', deque()))
@@ -1024,6 +1011,9 @@ class PasteScanner:
             executor.shutdown(wait=False, cancel_futures=True)
         except TypeError:
             executor.shutdown(wait=False)
+            
+        import os
+        os._exit(0)
 
     def _run_all_supervisor(self):
         """Run all sites concurrently using subprocesses and rich.Live UI."""
@@ -1062,11 +1052,15 @@ class PasteScanner:
             procs[tgt] = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=1048576)
 
         show_filter_col = getattr(self.args, 'filter', False)
+        start_time = time.time()
 
         def generate_table():
+            elapsed_mins = max(0.01, (time.time() - start_time) / 60.0)
+            
             table = Table(title="Live Scanner Performance", style="cyan")
             table.add_column("Site", justify="right", style="cyan", no_wrap=True)
             table.add_column("URLs Scanned", justify="center", style="magenta")
+            table.add_column("Speed", justify="center", style="bold green")
             table.add_column("Hits Found", justify="center", style="green")
             table.add_column("Written OK", justify="center", style="yellow")
             table.add_column("Empty/404", justify="center", style="dim white")
@@ -1079,10 +1073,13 @@ class PasteScanner:
                 status = "🟡" if procs[tgt].poll() is None else "🪦"
                 retry_pending = s.get("retry_pending", 0)
                 display_name = "justpaste (READ)" if tgt == "justpaste" else tgt
+                
+                speed = int(s.get("checked", 0) / elapsed_mins)
 
                 row = [
                     f"{display_name} {status}",
                     str(s.get("checked", 0)),
+                    f"{speed} u/m",
                     str(s.get("hits", 0)),
                     str(s.get("wrote", 0) + s.get("wrote_fake", 0)),
                     str(s.get("empty", 0)),

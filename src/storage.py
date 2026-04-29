@@ -29,6 +29,9 @@ class StorageManager:
         self.view_files_cache = {"ssavr": {}, "airforshare": {}, "copypaste": {}}
         self.last_view_flush = time.time()
         self.view_lock = threading.Lock()
+        self.state_lock = threading.Lock()  # Protects current_state during save
+        self.file_write_lock = threading.Lock()
+        self._last_state_save = 0
 
     def _load_history(self):
         if config.HISTORY_FILE.exists():
@@ -66,9 +69,25 @@ class StorageManager:
                 return {}
         return {}
 
-    def save_current_state(self):
-        with open(config.CURRENT_STATE_FILE, 'w', encoding='utf-8') as f:
-            json.dump(self.current_state, f, indent=2, ensure_ascii=False)
+    def save_current_state(self, force=False):
+        """Thread-safe snapshot save of current_state to disk with 5-second debounce."""
+        import time
+        if not force and time.time() - self._last_state_save < 5.0:
+            return
+            
+        with self.file_write_lock:
+            # Double check inside lock
+            if not force and time.time() - self._last_state_save < 5.0:
+                return
+            
+            with self.state_lock:
+                snapshot = dict(self.current_state)
+            try:
+                with open(config.CURRENT_STATE_FILE, 'w', encoding='utf-8') as f:
+                    json.dump(snapshot, f, indent=2, ensure_ascii=False)
+                self._last_state_save = time.time()
+            except Exception:
+                pass
 
     def _fast_hash(self, content):
         if _ext_loaded:

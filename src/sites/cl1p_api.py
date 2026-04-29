@@ -74,7 +74,6 @@ class Cl1pAPIClient:
                 
             elif resp.status_code in self.RATE_LIMIT_CODES:
                 self.consecutive_errors += 1
-                time.sleep(1)  # Backoff on rate limit
                 return None
                 
             else:
@@ -113,7 +112,6 @@ class Cl1pAPIClient:
                 return 'too_long'
             elif resp.status_code in self.RATE_LIMIT_CODES:
                 self.consecutive_errors += 1
-                time.sleep(1)
                 return None
             return False
         except requests.RequestException:
