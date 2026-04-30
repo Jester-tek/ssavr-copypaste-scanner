@@ -1011,9 +1011,12 @@ class PasteScanner:
             executor.shutdown(wait=False, cancel_futures=True)
         except TypeError:
             executor.shutdown(wait=False)
-            
-        import os
-        os._exit(0)
+
+        if not self.quiet_ui:
+            # Top-level run: force exit to kill any stuck threads
+            import os as _os
+            _os._exit(0)
+        # In quiet_ui (subprocess) mode: return normally so supervisor can detect exit and restart
 
     def _run_all_supervisor(self):
         """Run all sites concurrently using subprocesses and rich.Live UI."""
@@ -1058,9 +1061,9 @@ class PasteScanner:
         SPEED_WINDOW = 30  # seconds
         speed_snapshots = {tgt: [(time.time(), 0)] for tgt in ["cl1p", "justpaste", "rentry"]}
         
-        # Auto-restart tracking
+        # Auto-restart tracking (infinite restarts with exponential backoff)
         restart_counts = {tgt: 0 for tgt in ["cl1p", "justpaste", "rentry"]}
-        MAX_RESTARTS = 3
+        RESTART_COOLDOWNS = [2, 5, 10, 20, 30]  # seconds between restarts
         
         def _build_cmd(tgt):
             """Build the subprocess command for a target site."""
@@ -1077,8 +1080,11 @@ class PasteScanner:
             return cmd
         
         def _restart_proc(tgt, live_obj):
-            """Restart a dead subprocess and re-register its fds."""
+            """Restart a dead subprocess and re-register its fds. Infinite restarts with backoff."""
             cmd = _build_cmd(tgt)
+            # Exponential-ish backoff
+            cooldown = RESTART_COOLDOWNS[min(restart_counts[tgt], len(RESTART_COOLDOWNS) - 1)]
+            time.sleep(cooldown)
             new_proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=1048576)
             procs[tgt] = new_proc
             restart_counts[tgt] += 1
@@ -1093,7 +1099,7 @@ class PasteScanner:
                 active_fds.add(new_fd)
                 fd_buffers[new_fd] = bytearray()
             try:
-                live_obj.console.print(f"  🔄 {tgt} restarted (attempt {restart_counts[tgt]}/{MAX_RESTARTS})", style="bold cyan")
+                live_obj.console.print(f"  🔄 {tgt} restarted (#{restart_counts[tgt]}, cooldown was {cooldown}s)", style="bold cyan")
             except: pass
 
         def generate_table():
@@ -1264,20 +1270,17 @@ class PasteScanner:
                                     live.console.print(f"  ⚠️  {tgt} process exited with code {rc}", style="bold yellow")
                                 except: pass
                             
-                            # Auto-restart if under the limit
-                            if restart_counts[tgt] < MAX_RESTARTS:
+                            # Auto-restart SEMPRE - nessun limite di tentativi
+                            try:
+                                _restart_proc(tgt, live)
+                            except Exception as e:
                                 try:
-                                    time.sleep(2)  # Brief cooldown before restart
+                                    live.console.print(f"  ❌ {tgt} restart failed: {e}, ritento tra 10s...", style="bold red")
+                                except: pass
+                                time.sleep(10)
+                                try:
                                     _restart_proc(tgt, live)
-                                except Exception as e:
-                                    try:
-                                        live.console.print(f"  ❌ {tgt} restart failed: {e}", style="bold red")
-                                    except: pass
-                            else:
-                                if dead_fds:  # Only print once
-                                    try:
-                                        live.console.print(f"  💀 {tgt} permanently dead (max {MAX_RESTARTS} restarts reached)", style="bold red")
-                                    except: pass
+                                except: pass
                     
                     # Stale timeout
                     now = time.time()
