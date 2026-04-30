@@ -1053,9 +1053,51 @@ class PasteScanner:
 
         show_filter_col = getattr(self.args, 'filter', False)
         start_time = time.time()
+        
+        # Rolling speed: track (timestamp, checked) snapshots per site
+        SPEED_WINDOW = 30  # seconds
+        speed_snapshots = {tgt: [(time.time(), 0)] for tgt in ["cl1p", "justpaste", "rentry"]}
+        
+        # Auto-restart tracking
+        restart_counts = {tgt: 0 for tgt in ["cl1p", "justpaste", "rentry"]}
+        MAX_RESTARTS = 3
+        
+        def _build_cmd(tgt):
+            """Build the subprocess command for a target site."""
+            tgt_mode = self.mode
+            if tgt in ["justpaste", "rentry"]:
+                tgt_mode = "read"
+            cmd = [sys.executable, "-u", sys.argv[0], "--mod2", "-t", tgt, "--quiet-ui"]
+            if getattr(self.args, 'reset', False): cmd.append("--reset")
+            if getattr(self.args, 'start', ''): cmd.extend(["--start", self.args.start])
+            if getattr(self.args, 'filter', False): cmd.append("--filter")
+            if tgt_mode == "write" and tgt == "cl1p":
+                if getattr(self.args, 'write_file', None): cmd.extend(["-wf", self.args.write_file])
+                elif getattr(self.args, 'write', None): cmd.extend(["-w", self.args.write])
+            return cmd
+        
+        def _restart_proc(tgt, live_obj):
+            """Restart a dead subprocess and re-register its fds."""
+            cmd = _build_cmd(tgt)
+            new_proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=1048576)
+            procs[tgt] = new_proc
+            restart_counts[tgt] += 1
+            # Reset stats for clean speed tracking
+            speed_snapshots[tgt] = [(time.time(), live_stats[tgt].get("checked", 0))]
+            # Register new fds
+            for stream_name, stream_obj in [('stdout', new_proc.stdout), ('stderr', new_proc.stderr)]:
+                new_fd = stream_obj.fileno()
+                os.set_blocking(new_fd, False)
+                poller.register(new_fd, select.EPOLLIN)
+                fd_to_tgt[new_fd] = (tgt, new_proc, stream_name)
+                active_fds.add(new_fd)
+                fd_buffers[new_fd] = bytearray()
+            try:
+                live_obj.console.print(f"  🔄 {tgt} restarted (attempt {restart_counts[tgt]}/{MAX_RESTARTS})", style="bold cyan")
+            except: pass
 
         def generate_table():
-            elapsed_mins = max(0.01, (time.time() - start_time) / 60.0)
+            now = time.time()
             
             table = Table(title="Live Scanner Performance", style="cyan")
             table.add_column("Site", justify="right", style="cyan", no_wrap=True)
@@ -1070,15 +1112,30 @@ class PasteScanner:
             table.add_column("Retrying", justify="center", style="bold yellow")
             for tgt in ["cl1p", "justpaste", "rentry"]:
                 s = live_stats[tgt]
-                status = "🟡" if procs[tgt].poll() is None else "🪦"
+                is_alive = procs[tgt].poll() is None
+                status = "🟡" if is_alive else "🪦"
                 retry_pending = s.get("retry_pending", 0)
                 display_name = "justpaste (READ)" if tgt == "justpaste" else tgt
                 
-                speed = int(s.get("checked", 0) / elapsed_mins)
+                # Rolling speed: urls checked in the last SPEED_WINDOW seconds
+                current_checked = s.get("checked", 0)
+                snapshots = speed_snapshots[tgt]
+                snapshots.append((now, current_checked))
+                # Prune old snapshots
+                cutoff = now - SPEED_WINDOW
+                while len(snapshots) > 1 and snapshots[0][0] < cutoff:
+                    snapshots.pop(0)
+                # Calculate rate
+                if len(snapshots) >= 2 and is_alive:
+                    dt = max(0.01, snapshots[-1][0] - snapshots[0][0])
+                    delta_checked = snapshots[-1][1] - snapshots[0][1]
+                    speed = int((delta_checked / dt) * 60)  # per minute
+                else:
+                    speed = 0
 
                 row = [
                     f"{display_name} {status}",
-                    str(s.get("checked", 0)),
+                    str(current_checked),
                     f"{speed} u/m",
                     str(s.get("hits", 0)),
                     str(s.get("wrote", 0) + s.get("wrote_fake", 0)),
@@ -1173,7 +1230,7 @@ class PasteScanner:
                         last_progress = time.time()
                         prev_totals = dict(current_totals)
                     
-                    # Per-process death: clean up dead process fds
+                    # Per-process death: clean up dead process fds and auto-restart
                     for tgt, p in list(procs.items()):
                         if p.poll() is not None:
                             dead_fds = [fd for fd, (t, proc, _) in fd_to_tgt.items() if t == tgt and fd in active_fds]
@@ -1206,6 +1263,21 @@ class PasteScanner:
                                 try:
                                     live.console.print(f"  ⚠️  {tgt} process exited with code {rc}", style="bold yellow")
                                 except: pass
+                            
+                            # Auto-restart if under the limit
+                            if restart_counts[tgt] < MAX_RESTARTS:
+                                try:
+                                    time.sleep(2)  # Brief cooldown before restart
+                                    _restart_proc(tgt, live)
+                                except Exception as e:
+                                    try:
+                                        live.console.print(f"  ❌ {tgt} restart failed: {e}", style="bold red")
+                                    except: pass
+                            else:
+                                if dead_fds:  # Only print once
+                                    try:
+                                        live.console.print(f"  💀 {tgt} permanently dead (max {MAX_RESTARTS} restarts reached)", style="bold red")
+                                    except: pass
                     
                     # Stale timeout
                     now = time.time()
