@@ -12,11 +12,20 @@ import time
 import signal
 import hashlib
 import argparse
+import resource
 import threading
 from datetime import datetime
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor, as_completed, wait, FIRST_COMPLETED
 from pathlib import Path
+
+# Raise file descriptor limit to 65536 at startup to handle 2500+ concurrent connections
+try:
+    _soft, _hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+    _target = min(65536, _hard if _hard > 0 else 65536)
+    resource.setrlimit(resource.RLIMIT_NOFILE, (_target, _hard))
+except Exception:
+    pass  # Not fatal - will just hit the limit sooner
 
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -516,8 +525,11 @@ class PasteScanner:
         self.state[retry_key] = list(getattr(self, 'retry_queue', deque()))
         
         STATE_FILE.parent.mkdir(exist_ok=True)
-        with open(STATE_FILE, "w") as f:
-            json.dump(self.state, f, indent=2)
+        try:
+            with open(STATE_FILE, "w") as f:
+                json.dump(self.state, f, indent=2)
+        except OSError:
+            pass  # Non fatale: il stato verrà salvato al prossimo tentativo
 
     def _handle_interrupt(self, sig, frame):
         self.running = False
@@ -1081,6 +1093,14 @@ class PasteScanner:
         
         def _restart_proc(tgt, live_obj):
             """Restart a dead subprocess and re-register its fds. Infinite restarts with backoff."""
+            # Close old pipes to release file descriptors before restarting
+            old_proc = procs.get(tgt)
+            if old_proc:
+                for stream in [old_proc.stdout, old_proc.stderr, old_proc.stdin]:
+                    try:
+                        if stream: stream.close()
+                    except: pass
+            
             cmd = _build_cmd(tgt)
             # Exponential-ish backoff
             cooldown = RESTART_COOLDOWNS[min(restart_counts[tgt], len(RESTART_COOLDOWNS) - 1)]
