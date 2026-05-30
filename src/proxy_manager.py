@@ -15,6 +15,7 @@ class ProxyManager:
         self.sources = config.PROXY_SOURCES
         self.proxies_list = [] # List of dicts
         self.proxies_dict = {} # Keyed by address
+        self.working_proxies = [] # List of proxy addresses that recently worked
         self.lock = threading.Lock()
         self._refresh_running = False
         self._refresh_thread = None
@@ -136,16 +137,35 @@ class ProxyManager:
             if not self.proxies_list:
                 return None
                 
+            # 90% chance to reuse a working proxy if available to avoid failing on known dead proxies
+            if self.working_proxies and random.random() < 0.90:
+                addr = random.choice(self.working_proxies)
+                if addr in self.proxies_dict:
+                    return self.proxies_dict[addr]
+                
             # Pick a random sample and return the one with least fails
             sample_size = min(20, len(self.proxies_list))
             candidates = random.sample(self.proxies_list, sample_size)
             return min(candidates, key=lambda x: x['fails'])
             
     def mark_failure(self, proxy_address):
-        """Increments the failure count for a proxy in O(1) time."""
+        """Increments the failure count for a proxy in O(1) time and removes it from the working pool."""
         with self.lock:
             if proxy_address in self.proxies_dict:
                 self.proxies_dict[proxy_address]['fails'] += 1
+                if proxy_address in self.working_proxies:
+                    try:
+                        self.working_proxies.remove(proxy_address)
+                    except ValueError:
+                        pass
+                        
+    def mark_success(self, proxy_address):
+        """Resets the failure count for a proxy and adds it to the working pool."""
+        with self.lock:
+            if proxy_address in self.proxies_dict:
+                self.proxies_dict[proxy_address]['fails'] = 0
+                if proxy_address not in self.working_proxies:
+                    self.working_proxies.append(proxy_address)
                 
     def get_requests_dict(self, proxy):
         """Converts our proxy dict into a format requests.get(proxies=...) understands"""

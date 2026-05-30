@@ -399,7 +399,7 @@ class PasteScanner:
             self.cl1p_tokens = [primary_token]
             
         if self.target == "cl1p":
-            self.workers = 2500  # Match other scanners - cl1p API is lightweight
+            self.workers = 200  # Reduced: free proxies have ~6% success rate, 200 workers is optimal
             self.using_proxies = True # FORCED PROXIES due to 100% IP ban on cl1p
             self.site_timeout = 5  # Increased for proxy handshake
         elif self.target == "rentry":
@@ -518,16 +518,29 @@ class PasteScanner:
 
     def _save_state(self):
         state_key = f"{self.target}_{self.mode}"
-        self.state[state_key] = self.current_idx
-        
-        # Persist retry queue so failed URLs survive restarts
         retry_key = f"{self.target}_{self.mode}_retry"
-        self.state[retry_key] = list(getattr(self, 'retry_queue', deque()))
+        
+        # Reload state from disk to merge with other processes' updates
+        current_state = {}
+        if STATE_FILE.exists():
+            try:
+                with open(STATE_FILE, "r") as f:
+                    current_state = json.load(f)
+            except:
+                current_state = self.state
+        else:
+            current_state = self.state
+            
+        current_state[state_key] = self.current_idx
+        current_state[retry_key] = list(getattr(self, 'retry_queue', deque()))
+        
+        # Keep our in-memory state updated too
+        self.state = current_state
         
         STATE_FILE.parent.mkdir(exist_ok=True)
         try:
             with open(STATE_FILE, "w") as f:
-                json.dump(self.state, f, indent=2)
+                json.dump(current_state, f, indent=2)
         except OSError:
             pass  # Non fatale: il stato verrà salvato al prossimo tentativo
 
@@ -625,6 +638,10 @@ class PasteScanner:
                     self._rotate_worker_proxy(client)
                 continue
 
+            # Mark proxy success as the request succeeded
+            if self.using_proxies and self.proxy_mgr and client.current_proxy:
+                self.proxy_mgr.mark_success(client.current_proxy)
+
             if not content:
                 result["status"] = "empty"
                 return result
@@ -679,6 +696,10 @@ class PasteScanner:
                     self._rotate_worker_proxy(client)
                 continue
 
+            # Mark proxy success as the request succeeded
+            if self.using_proxies and self.proxy_mgr and client.current_proxy:
+                self.proxy_mgr.mark_success(client.current_proxy)
+
             # Decide whether to write content
             should_write = False
             
@@ -714,6 +735,9 @@ class PasteScanner:
                         content_to_write = content_to_write[:900].rsplit('\n', 1)[0]
                         wrote = client.write(url_str, content_to_write)
                     if wrote is True:
+                        # Mark proxy success as the request succeeded
+                        if self.using_proxies and self.proxy_mgr and client.current_proxy:
+                            self.proxy_mgr.mark_success(client.current_proxy)
                         # Verify write by re-reading (API is sync, no delay needed)
                         verify = client.read(url_str)
                         if verify and content_to_write[:30] in verify:
@@ -930,10 +954,14 @@ class PasteScanner:
                 
                 self._flush_print_batch()
 
-                # Maintain a full queue of workers using a sliding window
+                # Maintain a full queue of workers using a sliding window.
+                # Interleave: take 1 fresh URL every 5 slots so current_idx always
+                # advances even when the retry queue has many pending items.
                 while len(futures) < self.workers and self.running:
-                    if getattr(self, 'retry_queue', deque()):
-                        idx = self.retry_queue.popleft()
+                    retry_q = getattr(self, 'retry_queue', deque())
+                    _use_retry = bool(retry_q) and (len(futures) % 5 != 0)
+                    if _use_retry:
+                        idx = retry_q.popleft()
                     else:
                         idx = self.current_idx
                         self.current_idx += 1
@@ -986,11 +1014,15 @@ class PasteScanner:
                             self.stats["skipped_mine"] += 1
                         elif r["status"] in ["error", "rate_limit", "error_write"]:
                             if not hasattr(self, 'retry_queue'): self.retry_queue = deque()
-                            self.retry_queue.append(r["idx"])
+                            # Cap retry queue to prevent it from consuming all worker slots
+                            # and stalling forward progress on new URLs.
+                            if len(self.retry_queue) < 500:
+                                self.retry_queue.append(r["idx"])
                             self.stats["errors"] += 1
                         else:
                             if not hasattr(self, 'retry_queue'): self.retry_queue = deque()
-                            self.retry_queue.append(r["idx"])
+                            if len(self.retry_queue) < 500:
+                                self.retry_queue.append(r["idx"])
                             self.stats["errors"] += 1
 
                 last_url = index_to_string(self.current_idx - 1)

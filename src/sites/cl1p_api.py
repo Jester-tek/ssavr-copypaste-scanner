@@ -6,6 +6,19 @@ class Cl1pAPIClient:
     """Client per cl1p.net usando le API ufficiali con token."""
     
     RATE_LIMIT_CODES = {403, 429, 503}
+    CLOUDFLARE_MARKERS = [
+        "Just a moment...",
+        "Checking your browser",
+        "cf-browser-verification",
+        "challenges.cloudflare.com",
+        "_cf_chl_opt",
+    ]
+    
+    def _is_cloudflare(self, html):
+        for marker in self.CLOUDFLARE_MARKERS:
+            if marker in html:
+                return True
+        return False
     
     def __init__(self, api_token, session_factory=None):
         self.api_token = api_token
@@ -61,6 +74,9 @@ class Cl1pAPIClient:
             
             if resp.status_code == 200:
                 text = resp.text.strip()
+                if self._is_cloudflare(text):
+                    self.consecutive_errors += 1
+                    return None
                 # cl1p returns empty body or default message for empty clips
                 if not text or "Content is destroyed" in text:
                     self.consecutive_errors = 0
